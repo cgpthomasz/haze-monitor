@@ -92,16 +92,16 @@ def band_emoji(value: float, is_psi: bool = False) -> str:
     """Return a single colored circle representing the air-quality band."""
     if is_psi:
         if value <= 50:   return "🟢"   # Good
-        if value <= 100:  return "🟡"   # Moderate
-        if value <= 200:  return "🟠"   # Unhealthy
-        if value <= 300:  return "🔴"   # Very Unhealthy
-        return "🟣"                     # Hazardous
+        if value <= 100:  return "🟠"   # Moderate
+        if value <= 200:  return "🔴"   # Unhealthy
+        if value <= 300:  return "🟣"   # Very Unhealthy
+        return "💀"                     # Hazardous
 
     # PM2.5 µg/m³ (NEA 1-hour bands)
     if value <= 55:   return "🟢"       # Normal
-    if value <= 150:  return "🟡"       # Elevated
-    if value <= 250:  return "🟠"       # High
-    return "🔴"                         # Very High
+    if value <= 150:  return "🟠"       # Elevated
+    if value <= 250:  return "🔴"       # High
+    return "💀"                         # Very High
 
 # =============================================================================
 # HTTP helpers

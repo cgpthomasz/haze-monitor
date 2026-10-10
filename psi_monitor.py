@@ -279,13 +279,11 @@ def format_message(readings: dict) -> str:
     Layout:
         <b>PSI Updated:</b> 10 Oct, 08:01 pm
         ━━━━━━━━━━━━━━━━━━━━━━━━━
-        <blockquote>
         <b>1h   2.5</b> <code>🟠 C:100 W:85 S:55 E:60 N:76</code>
         <b>24h  2.5</b> <code>🟠 C:118 W:104 S:81 E:101 N:72</code>
         <b>24h  PSI</b> <code>🔴 C:166 W:152 S:127 E:148 N:119</code>
-        </blockquote>
 
-    Bold prefixes + monospace readings + blockquote + horizontal rule.
+    Bold prefixes + monospace readings + horizontal rule.
     Prefixes are padded to a fixed width so the readings column aligns.
     """
     lines: list[str] = []
@@ -296,7 +294,6 @@ def format_message(readings: dict) -> str:
         lines.append(HR)
 
     # Readings — one <b>prefix</b> <code>readings</code> line per metric
-    reading_lines: list[str] = []
     for key in METRIC_ORDER:
         meta = METRICS[key]
         if not meta["enabled"]:
@@ -318,12 +315,7 @@ def format_message(readings: dict) -> str:
 
         # Pad prefix to 7 chars so all bold prefixes have equal width
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
-        reading_lines.append(
-            f"<b>{prefix}</b> <code>{dot} {' '.join(parts)}</code>"
-        )
-
-    if reading_lines:
-        lines.append("<blockquote>" + "\n".join(reading_lines) + "</blockquote>")
+        lines.append(f"<b>{prefix}</b> <code>{dot} {' '.join(parts)}</code>")
 
     return "\n".join(lines)
 

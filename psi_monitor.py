@@ -63,12 +63,11 @@ def _band_emoji(v, is_psi=False):
         if v <= 200:  return "🟠"   # Unhealthy
         if v <= 300:  return "🔴"   # Very Unhealthy
         return "🟣"                 # Hazardous
-    # PM2.5 µg/m³ (roughly aligned with WHO 24h guidelines)
-    if v <= 12:   return "🟢"
-    if v <= 35:   return "🟡"
-    if v <= 55:   return "🟠"
-    if v <= 150:  return "🔴"
-    return "🟣"
+    # PM2.5 µg/m³ (NEA bands)
+    if v <= 55:   return "🟢"   # Normal
+    if v <= 150:  return "🟡"   # Elevated
+    if v <= 250:  return "🟠"   # High
+    return "🔴"                 # Very High
 
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
@@ -199,14 +198,18 @@ def format_message(readings):
         data = readings.get(key, {})
         if not data:
             continue
+
+        # One circle per row, based on the worst (highest) region
+        worst = max(data.values())
+        dot = _band_emoji(worst, is_psi=(key == "psi_24h"))
+
         parts = []
         for region, val in _ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
-            dot = _band_emoji(val, is_psi=(key == "psi_24h"))
-            parts.append(f"{abbr}:{_fmt(val)}{dot}")
-        # "1h   2.5" / "24h  2.5" / "24h  PSI" -- fixed 4-char window + 2-char metric
+            parts.append(f"{abbr}:{_fmt(val)}")
+
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
-        lines.append(f"{prefix} " + " ".join(parts))
+        lines.append(f"{prefix} {dot} " + " ".join(parts))
 
     return "\n".join(lines)
 

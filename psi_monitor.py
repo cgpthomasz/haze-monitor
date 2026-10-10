@@ -37,7 +37,7 @@ PM25_FALLBACK_URL = "https://api.data.gov.sg/v1/environment/pm25"
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
-HTTP_TIMEOUT = 3
+HTTP_TIMEOUT = 30
 MAX_RETRIES = 3
 MAX_DATA_AGE_HOURS = 3
 

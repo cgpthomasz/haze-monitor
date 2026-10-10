@@ -76,6 +76,9 @@ METRICS: dict[str, dict[str, Any]] = {
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
+# Horizontal rule (Unicode) — used below the header
+HR = "━" * 25
+
 # =============================================================================
 # Logging
 # =============================================================================
@@ -221,7 +224,8 @@ def send_telegram(text: str) -> None:
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text,
-               "disable_web_page_preview": True}
+               "disable_web_page_preview": True,
+               "parse_mode": "HTML"}
 
     for attempt in range(1, TELEGRAM_RETRIES + 1):
         try:
@@ -255,7 +259,7 @@ def fmt_num(v: float) -> str:
 
 
 def fmt_updated(ts_iso: str) -> str:
-    """Format the API's updatedTimestamp as 'PSI Updated: 10 Oct, 02:05 pm'."""
+    """Format 'PSI Updated: 10 Oct, 08:01 pm'."""
     ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
     dt = ts.astimezone(SGT)
     ampm = "am" if dt.hour < 12 else "pm"
@@ -270,18 +274,29 @@ def ordered_items(region_map: dict) -> list[tuple[str, float]]:
 
 
 def format_message(readings: dict) -> str:
-    """Build the Telegram message.
+    """Build the Telegram message (HTML).
 
-    Header uses the API's updatedTimestamp. One colored circle per metric row,
-    based on that row's highest value.
+    Layout:
+        <b>PSI Updated:</b> 10 Oct, 08:01 pm
+        ━━━━━━━━━━━━━━━━━━━━━━━━━
+        <blockquote>
+        <b>1h   2.5</b> <code>🟠 C:100 W:85 S:55 E:60 N:76</code>
+        <b>24h  2.5</b> <code>🟠 C:118 W:104 S:81 E:101 N:72</code>
+        <b>24h  PSI</b> <code>🔴 C:166 W:152 S:127 E:148 N:119</code>
+        </blockquote>
+
+    Bold prefixes + monospace readings + blockquote + horizontal rule.
+    Prefixes are padded to a fixed width so the readings column aligns.
     """
     lines: list[str] = []
 
-    # Header — from updatedTimestamp
+    # Header — bold prefix, plain timestamp
     if readings.get("updated"):
-        lines.append(fmt_updated(readings["updated"]))
+        lines.append(f"<b>PSI Updated:</b> {fmt_updated(readings['updated'])[13:]}")
+        lines.append(HR)
 
-    # One line per enabled metric
+    # Readings — one <b>prefix</b> <code>readings</code> line per metric
+    reading_lines: list[str] = []
     for key in METRIC_ORDER:
         meta = METRICS[key]
         if not meta["enabled"]:
@@ -291,19 +306,24 @@ def format_message(readings: dict) -> str:
         if not data:
             continue
 
-        # Single circle for the whole row — pick the worst (highest) region
+        # One circle per row — based on the worst (highest) region
         worst = max(data.values())
         dot = band_emoji(worst, is_psi=(key == "psi_24h"))
 
-        # Readings, in region order
+        # Readings in region order
         parts = []
         for region, val in ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
             parts.append(f"{abbr}:{fmt_num(val)}")
 
-        # Aligned prefix like "1h   2.5" / "24h  PSI"
+        # Pad prefix to 7 chars so all bold prefixes have equal width
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
-        lines.append(f"{prefix} {dot} " + " ".join(parts))
+        reading_lines.append(
+            f"<b>{prefix}</b> <code>{dot} {' '.join(parts)}</code>"
+        )
+
+    if reading_lines:
+        lines.append("<blockquote>" + "\n".join(reading_lines) + "</blockquote>")
 
     return "\n".join(lines)
 

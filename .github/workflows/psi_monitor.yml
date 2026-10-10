@@ -2,7 +2,7 @@ name: Singapore Haze Monitor
 
 on:
   schedule:
-    - cron: '0,2,5 * * * *'
+    - cron: '2,5 * * * *'
   workflow_dispatch:
 
 permissions:

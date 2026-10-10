@@ -22,8 +22,8 @@ import requests
 
 # ---------- Metric toggles ----------
 # Default: only 1-hour PM2.5. Flip to True to include the others.
-SEND_PSI_24H  = False
-SEND_PM25_24H = False
+SEND_PSI_24H  = True
+SEND_PM25_24H = True
 SEND_PM25_1H  = True
 # ------------------------------------
 
@@ -37,7 +37,7 @@ PM25_FALLBACK_URL = "https://api.data.gov.sg/v1/environment/pm25"
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
-HTTP_TIMEOUT = 30
+HTTP_TIMEOUT = 3
 MAX_RETRIES = 3
 MAX_DATA_AGE_HOURS = 3
 

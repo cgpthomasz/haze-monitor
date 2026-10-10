@@ -3,7 +3,7 @@
 Singapore Haze PSI + PM2.5 Monitor
 
 Pulls 24-hour PSI, 24-hour PM2.5, and 1-hour PM2.5 from data.gov.sg (NEA data)
-and sends a Telegram message only when any regional reading changes.
+and sends a Telegram message only when the API's updatedTimestamp changes.
 
 Runs hourly via GitHub Actions. Credentials come from environment variables
 (set as GitHub Secrets):
@@ -13,7 +13,7 @@ Runs hourly via GitHub Actions. Credentials come from environment variables
 CLI:
     python psi_monitor.py             # normal run
     python psi_monitor.py --preview   # print only, no send, no state write
-    python psi_monitor.py --force     # send even if readings unchanged
+    python psi_monitor.py --force     # send even if updatedTimestamp unchanged
 """
 
 from __future__ import annotations
@@ -128,8 +128,13 @@ def get_json(url: str) -> dict:
 # =============================================================================
 
 def _parse_v2(payload: dict) -> tuple[str, dict]:
+    """Return (updated_timestamp, readings).
+
+    Prefers the API's `updatedTimestamp`; falls back to `timestamp`.
+    """
     item = payload["data"]["items"][0]
-    return item["timestamp"], item["readings"]
+    updated = item.get("updatedTimestamp") or item["timestamp"]
+    return updated, item["readings"]
 
 
 def _check_fresh(ts_str: str) -> datetime:
@@ -141,39 +146,44 @@ def _check_fresh(ts_str: str) -> datetime:
 
 
 def fetch_all() -> dict:
-    """Fetch PSI + PM2.5 for all regions."""
+    """Fetch PSI + PM2.5 for all regions.
+
+    The dict includes a single `updated` field — the newest of the two APIs'
+    updatedTimestamp values. That value is what drives both dedup and display.
+    """
     result: dict[str, Any] = {"psi_24h": {}, "pm25_24h": {}, "pm25_1h": {}}
-    timestamps: list[str] = []
+    updated_times: list[str] = []
 
     # PSI + 24-hr PM2.5 (both come from the PSI endpoint)
-    ts, readings = _parse_v2(get_json(PSI_URL))
-    _check_fresh(ts)
+    updated, readings = _parse_v2(get_json(PSI_URL))
+    _check_fresh(updated)
     result["psi_24h"]  = {k.title(): int(v)
                           for k, v in readings["psi_twenty_four_hourly"].items()}
     result["pm25_24h"] = {k.title(): int(v)
                           for k, v in readings["pm25_twenty_four_hourly"].items()}
-    timestamps.append(ts)
-    log.info("PSI fetched from data.gov.sg v2")
+    updated_times.append(updated)
+    log.info("PSI fetched from data.gov.sg v2 (updated %s)", updated)
 
     # 1-hr PM2.5 (separate endpoint, with v1 fallback)
     try:
-        ts, readings = _parse_v2(get_json(PM25_URL))
-        _check_fresh(ts)
+        updated, readings = _parse_v2(get_json(PM25_URL))
+        _check_fresh(updated)
         result["pm25_1h"] = {k.title(): float(v)
                              for k, v in readings["pm25_one_hourly"].items()}
-        timestamps.append(ts)
-        log.info("PM2.5 fetched from data.gov.sg v2")
+        updated_times.append(updated)
+        log.info("PM2.5 fetched from data.gov.sg v2 (updated %s)", updated)
     except Exception as e:
         log.warning("v2 PM2.5 failed (%s); trying v1 fallback", e)
         fallback = get_json(PM25_FALLBACK_URL)
         item = fallback["items"][0]
-        _check_fresh(item["timestamp"])
+        updated = item.get("updatedTimestamp") or item["timestamp"]
+        _check_fresh(updated)
         result["pm25_1h"] = {k.title(): float(v)
                              for k, v in item["readings"]["pm25_one_hourly"].items()}
-        timestamps.append(item["timestamp"])
-        log.info("PM2.5 fetched from v1 fallback")
+        updated_times.append(updated)
+        log.info("PM2.5 fetched from v1 fallback (updated %s)", updated)
 
-    result["timestamp"] = max(timestamps)
+    result["updated"] = max(updated_times)   # newest of the two
     return result
 
 # =============================================================================
@@ -195,11 +205,11 @@ def save_state(state: dict) -> None:
     tmp.replace(STATE_FILE)
 
 
-def readings_only(data: dict | None) -> dict:
-    """Strip the timestamp so two snapshots can be compared meaningfully."""
+def state_key(data: dict | None) -> str:
+    """Return the field used to detect changes: the API's updatedTimestamp."""
     if not data:
-        return {}
-    return {k: data.get(k, {}) for k in METRICS}
+        return ""
+    return data.get("updated", "")
 
 # =============================================================================
 # Telegram
@@ -244,6 +254,14 @@ def fmt_num(v: float) -> str:
     return f"{v:.1f}" if isinstance(v, float) and not v.is_integer() else str(int(v))
 
 
+def fmt_updated(ts_iso: str) -> str:
+    """Format the API's updatedTimestamp as 'PSI Updated: 10 Oct, 02:05 pm'."""
+    ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+    dt = ts.astimezone(SGT)
+    ampm = "am" if dt.hour < 12 else "pm"
+    return f"PSI Updated: {dt.strftime('%d %b, %I:%M')} {ampm}"
+
+
 def ordered_items(region_map: dict) -> list[tuple[str, float]]:
     """Return region items in REGION_ORDER; unknown regions sorted after."""
     rank = {r: i for i, r in enumerate(REGION_ORDER)}
@@ -254,14 +272,14 @@ def ordered_items(region_map: dict) -> list[tuple[str, float]]:
 def format_message(readings: dict) -> str:
     """Build the Telegram message.
 
-    One colored circle per metric row — based on that row's highest value.
+    Header uses the API's updatedTimestamp. One colored circle per metric row,
+    based on that row's highest value.
     """
     lines: list[str] = []
 
-    # Header
-    if readings.get("timestamp"):
-        ts = datetime.fromisoformat(readings["timestamp"].replace("Z", "+00:00"))
-        lines.append("🌫 " + ts.astimezone(SGT).strftime("%d %b, %H:%M"))
+    # Header — from updatedTimestamp
+    if readings.get("updated"):
+        lines.append(fmt_updated(readings["updated"]))
 
     # One line per enabled metric
     for key in METRIC_ORDER:
@@ -298,7 +316,7 @@ def main() -> int:
     ap.add_argument("--preview", action="store_true",
                     help="Print the message without sending or saving state")
     ap.add_argument("--force", action="store_true",
-                    help="Send even if readings are unchanged")
+                    help="Send even if updatedTimestamp is unchanged")
     args = ap.parse_args()
 
     try:
@@ -320,8 +338,10 @@ def main() -> int:
     state = load_state()
     prev = state.get("last_reading")
 
-    if not args.force and readings_only(current) == readings_only(prev):
-        log.info("Readings unchanged; skipping Telegram message")
+    # Dedup: only the API's updatedTimestamp matters
+    if not args.force and state_key(current) == state_key(prev):
+        log.info("updatedTimestamp unchanged (%s); skipping Telegram message",
+                 state_key(current))
         return 0
 
     try:
@@ -333,7 +353,7 @@ def main() -> int:
     state["last_reading"] = current
     state["last_sent_at"] = datetime.now(SGT).isoformat()
     save_state(state)
-    log.info("Message sent to Telegram (force=%s)", args.force)
+    log.info("updatedTimestamp changed -> message sent (force=%s)", args.force)
     return 0
 
 

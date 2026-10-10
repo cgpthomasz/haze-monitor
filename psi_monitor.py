@@ -47,9 +47,12 @@ log = logging.getLogger("psi_monitor")
 
 METRIC_ORDER = ["pm25_1h", "pm25_24h", "psi_24h"]
 METRICS = {
-    "psi_24h":  {"label": "24-hr PSI", "enabled": SEND_PSI_24H},
-    "pm25_24h": {"label": "24-hr 2.5", "enabled": SEND_PM25_24H},
-    "pm25_1h":  {"label": "1-hr 2.5",  "enabled": SEND_PM25_1H},
+    "psi_24h":  {"label": "24-hr PSI", "enabled": SEND_PSI_24H,
+                 "prefix": "24h", "short": "PSI"},
+    "pm25_24h": {"label": "24-hr 2.5", "enabled": SEND_PM25_24H,
+                 "prefix": "24h", "short": "2.5"},
+    "pm25_1h":  {"label": "1-hr 2.5",  "enabled": SEND_PM25_1H,
+                 "prefix": "1h",  "short": "2.5"},
 }
 
 REGION_ORDER = ["central", "west", "south", "east", "north"]
@@ -172,7 +175,7 @@ def format_message(readings):
 
     if readings.get("timestamp"):
         ts = datetime.fromisoformat(readings["timestamp"].replace("Z", "+00:00"))
-        lines.append(ts.astimezone(SGT).strftime("%d %b, %H:%M"))
+        lines.append("🌫 " + ts.astimezone(SGT).strftime("%d %b, %H:%M"))
 
     for key in METRIC_ORDER:
         meta = METRICS[key]
@@ -185,8 +188,9 @@ def format_message(readings):
         for region, val in _ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
             parts.append(f"{abbr}:{_fmt(val)}")
-        sep = " " if key == "psi_24h" else " - "
-        lines.append(f"{meta['label']}{sep}" + " ".join(parts))
+        # "1h   2.5" / "24h  2.5" / "24h  PSI" -- fixed 4-char window + 2-char metric
+        prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
+        lines.append(f"{prefix} " + " ".join(parts))
 
     return "\n".join(lines)
 

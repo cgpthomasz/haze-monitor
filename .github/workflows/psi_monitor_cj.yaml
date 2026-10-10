@@ -1,4 +1,4 @@
-name: Singapore Haze Monitor
+name: Singapore Haze Monitor CJ
 
 on:
   workflow_dispatch:

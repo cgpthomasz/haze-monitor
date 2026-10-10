@@ -139,15 +139,29 @@ def save_state(state):
 def send_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set")
-    r = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TELEGRAM_CHAT_ID, "text": text,
-              "disable_web_page_preview": True},
-        timeout=HTTP_TIMEOUT)
-    r.raise_for_status()
-    if not r.json().get("ok"):
-        raise RuntimeError(f"Telegram API error: {r.json()}")
 
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text,
+               "disable_web_page_preview": True}
+
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(url, json=payload, timeout=HTTP_TIMEOUT)
+            data = r.json()
+            if data.get("ok"):
+                return
+            # Respect Telegram's retry_after on 429
+            if r.status_code == 429:
+                wait = data.get("parameters", {}).get("retry_after", 5)
+                log.warning("Telegram rate-limited; sleeping %ss", wait)
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"Telegram error: {data}")
+        except requests.RequestException as e:
+            log.warning("Telegram attempt %d/3 failed: %s", attempt, e)
+            time.sleep(2 ** attempt)
+
+    raise RuntimeError("Telegram send failed after retries")
 
 def _fmt(v):
     return f"{v:.1f}" if isinstance(v, float) and not v.is_integer() else str(int(v))

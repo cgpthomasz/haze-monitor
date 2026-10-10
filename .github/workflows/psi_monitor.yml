@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   monitor:
@@ -23,9 +23,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Debug - peek at API
-        run: |
-          python -c "import requests, json; r=requests.get('https://api-open.data.gov.sg/v2/real-time/api/psi'); print(r.status_code); print(json.dumps(r.json(), indent=2)[:2000])"
+      - name: Restore state file
+        uses: actions/cache/restore@v4
+        with:
+          path: .psi_state.json
+          key: psi-state-${{ github.run_id }}
+          restore-keys: |
+            psi-state-
 
       - name: Run monitor script
         env:
@@ -33,11 +37,9 @@ jobs:
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python psi_monitor.py
 
-      - name: Commit updated state file
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase
-          git add -A
-          git diff --staged --quiet || git commit -m "Update PSI state [skip ci]"
-          git push
+      - name: Save state file
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .psi_state.json
+          key: psi-state-${{ github.run_id }}

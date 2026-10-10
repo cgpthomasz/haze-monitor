@@ -279,21 +279,26 @@ def format_message(readings: dict) -> str:
     Layout:
         <b>PSI Updated:</b> 10 Oct, 08:01 pm
         ━━━━━━━━━━━━━━━━━━━━━━━━━
-        <b>1h   2.5</b> <code>🟠 C:100 W:85 S:55 E:60 N:76</code>
-        <b>24h  2.5</b> <code>🟠 C:118 W:104 S:81 E:101 N:72</code>
-        <b>24h  PSI</b> <code>🔴 C:166 W:152 S:127 E:148 N:119</code>
+        <blockquote>
+        🟠 <b>1h 2.5:</b>
+        <code>C:100 W:85 S:55 E:60 N:76</code>
+        🟠 <b>24h 2.5:</b>
+        <code>C:118 W:104 S:81 E:101 N:72</code>
+        🔴 <b>24h PSI:</b>
+        <code>C:166 W:152 S:127 E:148 N:119</code>
+        </blockquote>
 
-    Bold prefixes + monospace readings + horizontal rule.
-    Prefixes are padded to a fixed width so the readings column aligns.
+    Emoji first, bold prefix, readings on the next line in monospace.
     """
     lines: list[str] = []
 
     # Header — bold prefix, plain timestamp
-    if readings.get("updated"):
-        lines.append(f"<b>PSI Updated:</b> {fmt_updated(readings['updated'])[13:]}")
+    if readings.get("timestamp"):
+        lines.append(f"<b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
         lines.append(HR)
 
-    # Readings — one <b>prefix</b> <code>readings</code> line per metric
+    # Readings — each metric is a 2-line block inside a blockquote
+    reading_blocks: list[str] = []
     for key in METRIC_ORDER:
         meta = METRICS[key]
         if not meta["enabled"]:
@@ -315,7 +320,12 @@ def format_message(readings: dict) -> str:
 
         # Pad prefix to 7 chars so all bold prefixes have equal width
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
-        lines.append(f"<b>{prefix}</b> <code>{dot} {' '.join(parts)}</code>")
+        reading_blocks.append(
+            f"{dot} <b>{prefix}:</b>\n<code>{' '.join(parts)}</code>"
+        )
+
+    if reading_blocks:
+        lines.append("<blockquote>" + "\n".join(reading_blocks) + "</blockquote>")
 
     return "\n".join(lines)
 

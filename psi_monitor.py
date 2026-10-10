@@ -329,11 +329,11 @@ def format_message(readings: dict) -> str:
         ━━━━━━━━━━━━━━━━━━━━━━━━━
         <blockquote>
         🟠 <b>1h   2.5:</b>
-        <code>C:100 W:85 S:55 E:60 N:76</code>
+        <b>C</b>:100 <b>W</b>:85 <b>S</b>:55 <b>E</b>:60 <b>N</b>:76
         🟠 <b>24h  2.5:</b>
-        <code>C:118 W:104 S:81 E:101 N:72</code>
+        <b>C</b>:118 <b>W</b>:104 <b>S</b>:81 <b>E</b>:101 <b>N</b>:72
         🔴 <b>24h  PSI:</b>
-        <code>C:166 W:152 S:127 E:148 N:119</code>
+        <b>C</b>:166 <b>W</b>:152 <b>S</b>:127 <b>E</b>:148 <b>N</b>:119
         </blockquote>
         <code>🌡️ 26.8-29.6°c | 💧 77-99%</code>
     """
@@ -359,16 +359,16 @@ def format_message(readings: dict) -> str:
         worst = max(data.values())
         dot = band_emoji(worst, is_psi=(key == "psi_24h"))
 
-        # Readings in region order
+        # Readings in region order, with bold region letters
         parts = []
         for region, val in ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
-            parts.append(f"{abbr}:{fmt_num(val)}")
+            parts.append(f"<b>{abbr}</b>:{fmt_num(val)}")
 
         # Pad prefix to 7 chars so all bold prefixes have equal width
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
         reading_blocks.append(
-            f"{dot} <b>{prefix}:</b>\n<code>{' '.join(parts)}</code>"
+            f"{dot} <b>{prefix}:</b>\n" + " ".join(parts)
         )
 
     if reading_blocks:

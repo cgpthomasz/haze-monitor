@@ -2,8 +2,9 @@
 """
 Singapore Haze PSI + PM2.5 Monitor
 
-Pulls 24-hour PSI, 24-hour PM2.5, and 1-hour PM2.5 from data.gov.sg (NEA data)
-and sends a Telegram message only when the API's timestamp changes.
+Pulls 24-hour PSI, 24-hour PM2.5, and 1-hour PM2.5 from data.gov.sg (NEA data),
+plus air temperature and relative humidity, and sends a Telegram message only
+when the API's timestamp changes.
 
 Runs hourly via GitHub Actions. Credentials come from environment variables
 (set as GitHub Secrets):
@@ -43,6 +44,8 @@ SEND_PM25_1H  = True
 PSI_URL           = "https://api-open.data.gov.sg/v2/real-time/api/psi"
 PM25_URL          = "https://api-open.data.gov.sg/v2/real-time/api/pm25"
 PM25_FALLBACK_URL = "https://api.data.gov.sg/v1/environment/pm25"
+TEMP_URL          = "https://api-open.data.gov.sg/v2/real-time/api/air-temperature"
+HUMIDITY_URL      = "https://api-open.data.gov.sg/v2/real-time/api/relative-humidity"
 
 # Runtime settings
 HTTP_TIMEOUT       = 30          # seconds
@@ -144,11 +147,23 @@ def _check_fresh(ts_str: str) -> datetime:
     return ts
 
 
-def fetch_all() -> dict:
-    """Fetch PSI + PM2.5 for all regions.
+def _parse_stations(payload: dict) -> list[float]:
+    """Extract all station values from a v2 weather API response.
 
-    The result dict contains a `timestamp` field — the newest of the two APIs'
-    timestamps. That value drives both dedup and the message header.
+    Both the air-temperature and relative-humidity endpoints use the same
+    shape: data.readings[0].data is a list of {stationId, value}.
+    """
+    item = payload["data"]["readings"][0]
+    return [float(r["value"]) for r in item["data"]]
+
+
+def fetch_all() -> dict:
+    """Fetch PSI, PM2.5, temperature, and humidity.
+
+    The result dict contains a `timestamp` field — the newest of the two haze
+    APIs' timestamps. That value drives both dedup and the message header.
+    Weather data (temp/humidity) is fetched separately and aggregated into
+    min/max values.
     """
     result: dict[str, Any] = {"psi_24h": {}, "pm25_24h": {}, "pm25_1h": {}}
     timestamps: list[str] = []
@@ -183,6 +198,30 @@ def fetch_all() -> dict:
         log.info("PM2.5 fetched from v1 fallback (timestamp %s)", ts)
 
     result["timestamp"] = max(timestamps)   # newest of the two
+
+    # Weather: air temperature + relative humidity (min/max across stations)
+    try:
+        temp_values = _parse_stations(get_json(TEMP_URL))
+        result["temp_min"] = min(temp_values)
+        result["temp_max"] = max(temp_values)
+        log.info("Temperature fetched: %.1f-%.1f°C",
+                 result["temp_min"], result["temp_max"])
+    except Exception as e:
+        log.warning("Temperature fetch failed: %s", e)
+        result["temp_min"] = None
+        result["temp_max"] = None
+
+    try:
+        hum_values = _parse_stations(get_json(HUMIDITY_URL))
+        result["humidity_min"] = min(hum_values)
+        result["humidity_max"] = max(hum_values)
+        log.info("Humidity fetched: %.0f-%.0f%%",
+                 result["humidity_min"], result["humidity_max"])
+    except Exception as e:
+        log.warning("Humidity fetch failed: %s", e)
+        result["humidity_min"] = None
+        result["humidity_max"] = None
+
     return result
 
 # =============================================================================
@@ -269,6 +308,25 @@ def ordered_items(region_map: dict) -> list[tuple[str, float]]:
                   key=lambda kv: (rank.get(kv[0].lower(), len(rank)), kv[0].lower()))
 
 
+def fmt_weather(readings: dict) -> str:
+    """Return the temp/humidity line, or '' if unavailable."""
+    t_min = readings.get("temp_min")
+    t_max = readings.get("temp_max")
+    h_min = readings.get("humidity_min")
+    h_max = readings.get("humidity_max")
+
+    if t_min is None and h_min is None:
+        return ""
+
+    parts = []
+    if t_min is not None and t_max is not None:
+        parts.append(f"Temp: {t_min:.1f}-{t_max:.1f}°c")
+    if h_min is not None and h_max is not None:
+        parts.append(f"Humidity: {h_min:.0f}-{h_max:.0f}%")
+
+    return " | ".join(parts)
+
+
 def format_message(readings: dict) -> str:
     """Build the Telegram message (HTML).
 
@@ -283,6 +341,7 @@ def format_message(readings: dict) -> str:
         🔴 <b>24h  PSI:</b>
         <code>C:166 W:152 S:127 E:148 N:119</code>
         </blockquote>
+        <b>Temp:</b> <code>28.6-31.1°c</code> | <b>Humidity:</b> <code>89-95%</code>
     """
     lines: list[str] = []
 
@@ -320,6 +379,11 @@ def format_message(readings: dict) -> str:
 
     if reading_blocks:
         lines.append("<blockquote>" + "\n".join(reading_blocks) + "</blockquote>")
+
+    # Weather line — outside the blockquote, in its own code block
+    weather = fmt_weather(readings)
+    if weather:
+        lines.append(f"<code>{weather}</code>")
 
     return "\n".join(lines)
 

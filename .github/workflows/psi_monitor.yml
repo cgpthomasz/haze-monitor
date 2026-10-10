@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .psi_state.json
-          key: psi-state-${{ github.run_id }}
+          key: psi-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             psi-state-
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: Save state file
         uses: actions/cache/save@v4
-        if: always()
+        if: always() && hashFiles('.psi_state.json') != ''
         with:
           path: .psi_state.json
-          key: psi-state-${{ github.run_id }}
+          key: psi-state-${{ github.run_id }}-${{ github.run_attempt }}

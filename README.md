@@ -1,4 +1,3 @@
-```markdown
 # Singapore Haze Monitor
 
 A lightweight Python script that pulls the latest **PSI** and **PM2.5** readings

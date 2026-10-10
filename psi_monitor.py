@@ -158,13 +158,7 @@ def _parse_stations(payload: dict) -> list[float]:
 
 
 def fetch_all() -> dict:
-    """Fetch PSI, PM2.5, temperature, and humidity.
-
-    The result dict contains a `timestamp` field — the newest of the two haze
-    APIs' timestamps. That value drives both dedup and the message header.
-    Weather data (temp/humidity) is fetched separately and aggregated into
-    min/max values.
-    """
+    """Fetch PSI, PM2.5, temperature, and humidity."""
     result: dict[str, Any] = {"psi_24h": {}, "pm25_24h": {}, "pm25_1h": {}}
     timestamps: list[str] = []
 
@@ -320,9 +314,9 @@ def fmt_weather(readings: dict) -> str:
 
     parts = []
     if t_min is not None and t_max is not None:
-        parts.append(f"Temp: {t_min:.1f}-{t_max:.1f}°c")
+        parts.append(f"🌡️ {t_min:.1f}-{t_max:.1f}°c")
     if h_min is not None and h_max is not None:
-        parts.append(f"Humidity: {h_min:.0f}-{h_max:.0f}%")
+        parts.append(f"💧 {h_min:.0f}-{h_max:.0f}%")
 
     return " | ".join(parts)
 
@@ -341,7 +335,7 @@ def format_message(readings: dict) -> str:
         🔴 <b>24h  PSI:</b>
         <code>C:166 W:152 S:127 E:148 N:119</code>
         </blockquote>
-        <b>Temp:</b> <code>28.6-31.1°c</code> | <b>Humidity:</b> <code>89-95%</code>
+        <code>🌡️ 26.8-29.6°c | 💧 77-99%</code>
     """
     lines: list[str] = []
 

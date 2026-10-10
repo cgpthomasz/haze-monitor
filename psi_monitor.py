@@ -55,6 +55,21 @@ METRICS = {
                  "prefix": "1h",  "short": "2.5"},
 }
 
+def _band_emoji(v, is_psi=False):
+    """Colored circle indicating the air-quality band."""
+    if is_psi:
+        if v <= 50:   return "🟢"   # Good
+        if v <= 100:  return "🟡"   # Moderate
+        if v <= 200:  return "🟠"   # Unhealthy
+        if v <= 300:  return "🔴"   # Very Unhealthy
+        return "🟣"                 # Hazardous
+    # PM2.5 µg/m³ (roughly aligned with WHO 24h guidelines)
+    if v <= 12:   return "🟢"
+    if v <= 35:   return "🟡"
+    if v <= 55:   return "🟠"
+    if v <= 150:  return "🔴"
+    return "🟣"
+
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
@@ -187,7 +202,8 @@ def format_message(readings):
         parts = []
         for region, val in _ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
-            parts.append(f"{abbr}:{_fmt(val)}")
+            dot = _band_emoji(val, is_psi=(key == "psi_24h"))
+            parts.append(f"{abbr}:{_fmt(val)}{dot}")
         # "1h   2.5" / "24h  2.5" / "24h  PSI" -- fixed 4-char window + 2-char metric
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
         lines.append(f"{prefix} " + " ".join(parts))

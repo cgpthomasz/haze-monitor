@@ -89,10 +89,7 @@ log = logging.getLogger("psi_monitor")
 # =============================================================================
 
 def band_emoji(value: float, is_psi: bool = False) -> str:
-    """Return a colored circle representing the air-quality band.
-
-    PSI uses NEA bands. PM2.5 uses NEA 1-hour bands.
-    """
+    """Return a single colored circle representing the air-quality band."""
     if is_psi:
         if value <= 50:   return "🟢"   # Good
         if value <= 100:  return "🟡"   # Moderate
@@ -136,7 +133,6 @@ def _parse_v2(payload: dict) -> tuple[str, dict]:
 
 
 def _check_fresh(ts_str: str) -> datetime:
-    """Raise if the timestamp is older than MAX_DATA_AGE_HOURS."""
     ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
     age = datetime.now(SGT) - ts.astimezone(SGT)
     if age > timedelta(hours=MAX_DATA_AGE_HOURS):
@@ -145,7 +141,7 @@ def _check_fresh(ts_str: str) -> datetime:
 
 
 def fetch_all() -> dict:
-    """Fetch PSI + PM2.5 for all regions. Returns a readings dict."""
+    """Fetch PSI + PM2.5 for all regions."""
     result: dict[str, Any] = {"psi_24h": {}, "pm25_24h": {}, "pm25_1h": {}}
     timestamps: list[str] = []
 
@@ -177,7 +173,7 @@ def fetch_all() -> dict:
         timestamps.append(item["timestamp"])
         log.info("PM2.5 fetched from v1 fallback")
 
-    result["timestamp"] = max(timestamps)  # newest of the two sources
+    result["timestamp"] = max(timestamps)
     return result
 
 # =============================================================================
@@ -225,7 +221,6 @@ def send_telegram(text: str) -> None:
             if data.get("ok"):
                 return
 
-            # Respect Telegram's retry_after on 429
             if r.status_code == 429:
                 wait = data.get("parameters", {}).get("retry_after", 5)
                 log.warning("Telegram rate-limited; sleeping %ss", wait)
@@ -257,29 +252,38 @@ def ordered_items(region_map: dict) -> list[tuple[str, float]]:
 
 
 def format_message(readings: dict) -> str:
+    """Build the Telegram message.
+
+    One colored circle per metric row — based on that row's highest value.
+    """
     lines: list[str] = []
 
+    # Header
     if readings.get("timestamp"):
         ts = datetime.fromisoformat(readings["timestamp"].replace("Z", "+00:00"))
         lines.append("🌫 " + ts.astimezone(SGT).strftime("%d %b, %H:%M"))
 
+    # One line per enabled metric
     for key in METRIC_ORDER:
         meta = METRICS[key]
         if not meta["enabled"]:
             continue
+
         data = readings.get(key, {})
         if not data:
             continue
 
-        # One circle per row, based on the worst (highest) region
+        # Single circle for the whole row — pick the worst (highest) region
         worst = max(data.values())
         dot = band_emoji(worst, is_psi=(key == "psi_24h"))
 
+        # Readings, in region order
         parts = []
         for region, val in ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
             parts.append(f"{abbr}:{fmt_num(val)}")
 
+        # Aligned prefix like "1h   2.5" / "24h  PSI"
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
         lines.append(f"{prefix} {dot} " + " ".join(parts))
 

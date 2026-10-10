@@ -1,0 +1,43 @@
+name: Singapore Haze Monitor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore state file
+        uses: actions/cache/restore@v4
+        with:
+          path: .psi_state.json
+          key: psi-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            psi-state-
+
+      - name: Run monitor script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python psi_monitor.py
+
+      - name: Save state file
+        uses: actions/cache/save@v4
+        if: always() && hashFiles('.psi_state.json') != ''
+        with:
+          path: .psi_state.json
+          key: psi-state-${{ github.run_id }}-${{ github.run_attempt }}

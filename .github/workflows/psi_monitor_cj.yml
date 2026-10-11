@@ -31,9 +31,17 @@ jobs:
 
       - name: Run monitor script
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python psi_monitor.py
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "Running on main -> sending to channel"
+            python psi_monitor.py
+          else
+            echo "Running on ${{ github.ref_name }} -> sending to TEST chat"
+            python psi_monitor.py --force --to "$TELEGRAM_CHAT_ID_TEST"
+          fi
 
       - name: Save state file
         uses: actions/cache/save@v4

@@ -308,18 +308,19 @@ def format_message(readings: dict) -> str:
     Layout:
         🟠 PSI Updated: 11 Oct, 12:30 am
 
-        > Reg  |  PSI🟠  | 1h 2.5🟠 | 24h 2.5🟢
-        > ─────┼────────┼──────────┼──────────
-        >  C   |   149  |   100.0  |    102
-        >  W   |   151  |    98.0  |    104
-        >  S   |   115  |    98.0  |     69
-        >  E   |   136  |    84.0  |     90
-        >  N   |   118  |    68.0  |     71
+        > Reg  |  PSI | 1h 2.5 | 24h 2.5
+        >      |  🟠  |   🟠   |   🟢
+        > ─────┼──────┼────────┼────────
+        >  C   |  149 |  100.0 |    102
+        >  W   |  151 |   98.0 |    104
+        >  S   |  115 |   98.0 |     69
+        >  E   |  136 |   84.0 |     90
+        >  N   |  118 |   68.0 |     71
 
         🌡️ 29.1-30.9°c | 💧 70-85%
 
-    Emoji circles are inlined with the column headers to save a row.
-    Title circle uses the worst color from the three column circles.
+    - Colored circles sit on their own row directly below the header.
+    - Title circle uses the worst color from the three column circles.
     """
     lines: list[str] = []
 
@@ -345,12 +346,14 @@ def format_message(readings: dict) -> str:
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
     lines.append("")
 
-    # Table — emoji inlined with the column headers
-    header = f"Reg  |  PSI{psi_dot}  | 1h 2.5{pm1_dot} | 24h 2.5{pm24_dot}"
-    sep    = "─────┼────────┼──────────┼──────────"
+    # Table — header row, then circle row, then separator
+    header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"
+    circle_row = f"     |  {psi_dot}  |   {pm1_dot}   |   {pm24_dot}   "
+    sep        = "─────┼──────┼────────┼────────"
 
     table = [
         f"<code>{header}</code>",
+        f"<code>{circle_row}</code>",
         f"<code>{sep}</code>",
     ]
 
@@ -363,9 +366,9 @@ def format_message(readings: dict) -> str:
         pm24_v = pm24_vals.get(region_title)
 
         reg_cell  = f" {abbr}   "
-        psi_cell  = f"{int(psi_v):>6} "   if psi_v  is not None else "    -- "
-        pm1_cell  = f"{pm1_v:>8.1f} "     if pm1_v  is not None else "      -- "
-        pm24_cell = f"{int(pm24_v):>8} "  if pm24_v is not None else "      -- "
+        psi_cell  = f"{int(psi_v):>5} "   if psi_v  is not None else "   -- "
+        pm1_cell  = f"{pm1_v:>7.1f} "     if pm1_v  is not None else "     -- "
+        pm24_cell = f"{int(pm24_v):>7} "  if pm24_v is not None else "     -- "
 
         table.append(f"<code>{reg_cell}|{psi_cell}|{pm1_cell}|{pm24_cell}</code>")
 

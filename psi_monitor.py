@@ -2,9 +2,9 @@
 """
 Singapore Haze PSI + PM2.5 Monitor
 
-Pulls 24-hour PSI, 24-hour PM2.5, and 1-hour PM2.5 from data.gov.sg (NEA data),
-plus air temperature and relative humidity, and sends a Telegram message only
-when the API's timestamp changes.
+Pulls 24-hour PSI, 24-hour PM2.5, 1-hour PM2.5, air temperature, and relative
+humidity from data.gov.sg (NEA data), and sends a Telegram message only when
+the API's timestamp changes.
 
 Runs hourly via GitHub Actions. Credentials come from environment variables
 (set as GitHub Secrets):
@@ -12,9 +12,10 @@ Runs hourly via GitHub Actions. Credentials come from environment variables
     TELEGRAM_CHAT_ID
 
 CLI:
-    python psi_monitor.py             # normal run
-    python psi_monitor.py --preview   # print only, no send, no state write
-    python psi_monitor.py --force     # send even if timestamp unchanged
+    python psi_monitor.py                          # normal run
+    python psi_monitor.py --preview                # print only, no send, no state
+    python psi_monitor.py --force                  # send even if unchanged
+    python psi_monitor.py --to 123456789           # override chat target (testing)
 """
 
 from __future__ import annotations
@@ -63,23 +64,11 @@ STATE_FILE = Path(__file__).with_name(".psi_state.json")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Metric display order (top to bottom in the message)
-METRIC_ORDER = ["pm25_1h", "pm25_24h", "psi_24h"]
-
-METRICS: dict[str, dict[str, Any]] = {
-    "psi_24h":  {"label": "24-hr PSI", "enabled": SEND_PSI_24H,
-                 "prefix": "24h", "short": "PSI"},
-    "pm25_24h": {"label": "24-hr 2.5", "enabled": SEND_PM25_24H,
-                 "prefix": "24h", "short": "2.5"},
-    "pm25_1h":  {"label": "1-hr 2.5",  "enabled": SEND_PM25_1H,
-                 "prefix": "1h",  "short": "2.5"},
-}
-
 # Region display order (left to right) and abbreviations
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
-# Horizontal rule (Unicode) — used below the header
+# Horizontal rule — placed between title and table
 HR = "━" * 25
 
 # =============================================================================
@@ -93,6 +82,10 @@ log = logging.getLogger("psi_monitor")
 # =============================================================================
 # Air quality bands
 # =============================================================================
+
+# Severity rank used to pick the "worst" emoji for the title
+COLOR_RANK = {"🟢": 0, "🟠": 1, "🔴": 2, "🟣": 3, "💀": 4, "⚪": -1}
+
 
 def band_emoji(value: float, is_psi: bool = False) -> str:
     """Return a single colored circle representing the air-quality band."""
@@ -108,6 +101,11 @@ def band_emoji(value: float, is_psi: bool = False) -> str:
     if value <= 150:  return "🟠"       # Elevated
     if value <= 250:  return "🔴"       # High
     return "💀"                         # Very High
+
+
+def worst_color(emojis: list[str]) -> str:
+    """Return the emoji with the highest severity rank."""
+    return max(emojis, key=lambda e: COLOR_RANK.get(e, -1))
 
 # =============================================================================
 # HTTP helpers
@@ -148,11 +146,7 @@ def _check_fresh(ts_str: str) -> datetime:
 
 
 def _parse_stations(payload: dict) -> list[float]:
-    """Extract all station values from a v2 weather API response.
-
-    Both the air-temperature and relative-humidity endpoints use the same
-    shape: data.readings[0].data is a list of {stationId, value}.
-    """
+    """Extract all station values from a v2 weather API response."""
     item = payload["data"]["readings"][0]
     return [float(r["value"]) for r in item["data"]]
 
@@ -191,7 +185,7 @@ def fetch_all() -> dict:
         timestamps.append(ts)
         log.info("PM2.5 fetched from v1 fallback (timestamp %s)", ts)
 
-    result["timestamp"] = max(timestamps)   # newest of the two
+    result["timestamp"] = max(timestamps)
 
     # Weather: air temperature + relative humidity (min/max across stations)
     try:
@@ -247,12 +241,13 @@ def state_key(data: dict | None) -> str:
 # Telegram
 # =============================================================================
 
-def send_telegram(text: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set")
+def send_telegram(text: str, chat_id: str | None = None) -> None:
+    target = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN and a chat ID must be set")
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text,
+    payload = {"chat_id": target, "text": text,
                "disable_web_page_preview": True,
                "parse_mode": "HTML"}
 
@@ -283,23 +278,12 @@ def send_telegram(text: str) -> None:
 # Message formatting
 # =============================================================================
 
-def fmt_num(v: float) -> str:
-    return f"{v:.1f}" if isinstance(v, float) and not v.is_integer() else str(int(v))
-
-
 def fmt_timestamp(ts_iso: str) -> str:
     """Format the API's timestamp as '10 Oct, 08:01 pm' (SGT)."""
     ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
     dt = ts.astimezone(SGT)
     ampm = "am" if dt.hour < 12 else "pm"
     return f"{dt.strftime('%d %b, %I:%M')} {ampm}"
-
-
-def ordered_items(region_map: dict) -> list[tuple[str, float]]:
-    """Return region items in REGION_ORDER; unknown regions sorted after."""
-    rank = {r: i for i, r in enumerate(REGION_ORDER)}
-    return sorted(region_map.items(),
-                  key=lambda kv: (rank.get(kv[0].lower(), len(rank)), kv[0].lower()))
 
 
 def fmt_weather(readings: dict) -> str:
@@ -322,67 +306,86 @@ def fmt_weather(readings: dict) -> str:
 
 
 def format_message(readings: dict) -> str:
-    """Build the Telegram message (HTML).
+    """Build the Telegram message (HTML) as a monospace table inside a blockquote.
 
     Layout:
-        <b>PSI Updated: 10 Oct, 08:01 pm</b>
+        🟠 PSI Updated: 11 Oct, 12:30 am
         ━━━━━━━━━━━━━━━━━━━━━━━━━
-        <blockquote>
-        🟠 <b>1h   2.5:</b>
-        <b>C</b><code>:1  </code>  <b>W</b><code>:10 </code>  <b>S</b><code>:100</code>  <b>E</b><code>:5  </code>  <b>N</b><code>:23 </code>
-        ...
-        </blockquote>
-        <code>🌡️ 26.8-29.6°c | 💧 77-99%</code>
+        > Reg  |  PSI | 1h 2.5 | 24h 2.5
+        >      |  🟠  |   🟠   |   🟢
+        > -----+------+--------+--------
+        >  C   |  149 |  100.0 |    102
+        >  W   |  151 |   98.0 |    104
+        >  S   |  115 |   98.0 |     69
+        >  E   |  136 |   84.0 |     90
+        >  N   |  118 |   68.0 |     71
 
-    Bold region letters + monospace numbers, left-aligned within a 3-char field
-    so the digits sit right beside the colon and padding trails after.
+        🌡️ 29.1-30.9°c | 💧 70-85%
+
+    - Horizontal rule sits directly above the table (no gap).
+    - Colored circles sit on their own row directly below the header.
+    - Title circle uses the worst color from the three column circles.
     """
     lines: list[str] = []
 
-    # Header — bold "PSI Updated:" + formatted timestamp
+    # Pull readings per metric
+    psi_vals  = readings.get("psi_24h",  {})
+    pm1_vals  = readings.get("pm25_1h", {})
+    pm24_vals = readings.get("pm25_24h", {})
+
+    psi_max  = max(psi_vals.values())  if psi_vals  else None
+    pm1_max  = max(pm1_vals.values())  if pm1_vals  else None
+    pm24_max = max(pm24_vals.values()) if pm24_vals else None
+
+    # Circle per column — based on column max
+    psi_dot  = band_emoji(psi_max,  is_psi=True)  if psi_max  is not None else "⚪"
+    pm1_dot  = band_emoji(pm1_max,  is_psi=False) if pm1_max  is not None else "⚪"
+    pm24_dot = band_emoji(pm24_max, is_psi=False) if pm24_max is not None else "⚪"
+
+    # Title circle = worst of the three column circles
+    title_dot = worst_color([psi_dot, pm1_dot, pm24_dot])
+
+    # Title line + horizontal rule (no blank line — ruler hugs the table)
     if readings.get("timestamp"):
-        lines.append(f"<b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
+        lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
         lines.append(HR)
 
-    # Readings — each metric is a 2-line block inside a blockquote
-    reading_blocks: list[str] = []
-    for key in METRIC_ORDER:
-        meta = METRICS[key]
-        if not meta["enabled"]:
-            continue
+    # Table — header row, then circle row, then dash separator
+    header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"
+    circle_row = f"     |  {psi_dot}  |   {pm1_dot}   |   {pm24_dot}   "
+    sep        = "-----+------+--------+--------"
 
-        data = readings.get(key, {})
-        if not data:
-            continue
+    table = [
+        f"<code>{header}</code>",
+        f"<code>{circle_row}</code>",
+        f"<code>{sep}</code>",
+    ]
 
-        # One circle per row — based on the worst (highest) region
-        worst = max(data.values())
-        dot = band_emoji(worst, is_psi=(key == "psi_24h"))
+    for region_key in REGION_ORDER:
+        region_title = region_key.title()
+        abbr = REGION_ABBR[region_key]
 
-        # Readings in region order:
-        #   bold region letter + monospace ":NNN" (number left-aligned to 3)
-        parts = []
-        for region, val in ordered_items(data):
-            abbr = REGION_ABBR.get(region.lower(), region[0].upper())
-            padded = fmt_num(val).ljust(3)          # "1  ", "10 ", "100"
-            parts.append(f"<b>{abbr}</b><code>:{padded}</code>")
+        psi_v  = psi_vals.get(region_title)
+        pm1_v  = pm1_vals.get(region_title)
+        pm24_v = pm24_vals.get(region_title)
 
-        # Pad prefix to 7 chars so all bold prefixes have equal width
-        prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
-        reading_blocks.append(
-            f"{dot} <b>{prefix}:</b>\n" + "  ".join(parts)
-        )
+        reg_cell  = f" {abbr}   "
+        psi_cell  = f"{int(psi_v):>5} "   if psi_v  is not None else "   -- "
+        pm1_cell  = f"{pm1_v:>7.1f} "     if pm1_v  is not None else "     -- "
+        pm24_cell = f"{int(pm24_v):>7} "  if pm24_v is not None else "     -- "
 
-    if reading_blocks:
-        lines.append("<blockquote>" + "\n".join(reading_blocks) + "</blockquote>")
+        table.append(f"<code>{reg_cell}|{psi_cell}|{pm1_cell}|{pm24_cell}</code>")
 
-    # Weather line — outside the blockquote, in its own code block
+    # Wrap table in a blockquote
+    lines.append("<blockquote>" + "\n".join(table) + "</blockquote>")
+
+    # Weather line — outside the blockquote
     weather = fmt_weather(readings)
     if weather:
         lines.append(f"<code>{weather}</code>")
 
     return "\n".join(lines)
-    
+
 # =============================================================================
 # Entry point
 # =============================================================================
@@ -393,6 +396,8 @@ def main() -> int:
                     help="Print the message without sending or saving state")
     ap.add_argument("--force", action="store_true",
                     help="Send even if timestamp is unchanged")
+    ap.add_argument("--to", metavar="CHAT_ID", default=None,
+                    help="Send to this chat ID instead of TELEGRAM_CHAT_ID (testing)")
     args = ap.parse_args()
 
     try:
@@ -421,7 +426,7 @@ def main() -> int:
         return 0
 
     try:
-        send_telegram(text)
+        send_telegram(text, chat_id=args.to)
     except Exception as e:
         log.error("Telegram send failed: %s", e)
         return 1
@@ -429,7 +434,8 @@ def main() -> int:
     state["last_reading"] = current
     state["last_sent_at"] = datetime.now(SGT).isoformat()
     save_state(state)
-    log.info("timestamp changed -> message sent (force=%s)", args.force)
+    log.info("Message sent to Telegram (force=%s, to=%s)",
+             args.force, args.to or "default")
     return 0
 
 

@@ -68,6 +68,9 @@ TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
+# Horizontal rule — placed between title and table
+HR = "━" * 25
+
 # =============================================================================
 # Logging
 # =============================================================================
@@ -307,7 +310,7 @@ def format_message(readings: dict) -> str:
 
     Layout:
         🟠 PSI Updated: 11 Oct, 12:30 am
-
+        ━━━━━━━━━━━━━━━━━━━━━━━━━
         > Reg  |  PSI | 1h 2.5 | 24h 2.5
         >      |  🟠  |   🟠   |   🟢
         > -----+------+--------+--------
@@ -319,8 +322,8 @@ def format_message(readings: dict) -> str:
 
         🌡️ 29.1-30.9°c | 💧 70-85%
 
+    - Horizontal rule sits directly above the table (no gap).
     - Colored circles sit on their own row directly below the header.
-    - Separator uses plain dashes.
     - Title circle uses the worst color from the three column circles.
     """
     lines: list[str] = []
@@ -342,10 +345,10 @@ def format_message(readings: dict) -> str:
     # Title circle = worst of the three column circles
     title_dot = worst_color([psi_dot, pm1_dot, pm24_dot])
 
-    # Title line
+    # Title line + horizontal rule (no blank line — ruler hugs the table)
     if readings.get("timestamp"):
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
-    lines.append("")
+        lines.append(HR)
 
     # Table — header row, then circle row, then dash separator
     header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"

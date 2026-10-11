@@ -310,7 +310,7 @@ def format_message(readings: dict) -> str:
 
         > Reg  |  PSI | 1h 2.5 | 24h 2.5
         >      |  🟠  |   🟠   |   🟢
-        > ─────┼──────┼────────┼────────
+        > -----+------+--------+--------
         >  C   |  149 |  100.0 |    102
         >  W   |  151 |   98.0 |    104
         >  S   |  115 |   98.0 |     69
@@ -320,6 +320,7 @@ def format_message(readings: dict) -> str:
         🌡️ 29.1-30.9°c | 💧 70-85%
 
     - Colored circles sit on their own row directly below the header.
+    - Separator uses plain dashes.
     - Title circle uses the worst color from the three column circles.
     """
     lines: list[str] = []
@@ -346,10 +347,10 @@ def format_message(readings: dict) -> str:
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
     lines.append("")
 
-    # Table — header row, then circle row, then separator
+    # Table — header row, then circle row, then dash separator
     header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"
     circle_row = f"     |  {psi_dot}  |   {pm1_dot}   |   {pm24_dot}   "
-    sep        = "─────┼──────┼────────┼────────"
+    sep        = "-----+------+--------+--------"
 
     table = [
         f"<code>{header}</code>",

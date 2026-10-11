@@ -68,8 +68,8 @@ TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
-# Horizontal rule — placed between title and table
-HR = "━" * 25
+# Horizontal rule — placed between title and table (50% width)
+HR = "━" * 18
 
 # =============================================================================
 # Logging
@@ -310,21 +310,23 @@ def format_message(readings: dict) -> str:
 
     Layout:
         🟠 PSI Updated: 11 Oct, 12:30 am
-        ━━━━━━━━━━━━━━━━━━━━━━━━━
-        > Reg  |  PSI | 1h 2.5 | 24h 2.5
-        >      |  🟠  |   🟠   |   🟢
-        > -----+------+--------+--------
-        >  C   |  149 |  100.0 |    102
-        >  W   |  151 |   98.0 |    104
-        >  S   |  115 |   98.0 |     69
-        >  E   |  136 |   84.0 |     90
-        >  N   |  118 |   68.0 |     71
+        ━━━━━━━━━━━━━━━━━━
+        > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
+        >      |   🟠   |   🟢    |   🟠
+        > -----+--------+---------+--------
+        >  C   |    100 |     102 |   149
+        >  W   |     98 |     104 |   151
+        >  S   |     98 |      69 |   115
+        >  E   |     84 |      90 |   136
+        >  N   |     68 |      71 |   118
 
         🌡️ 29.1-30.9°c | 💧 70-85%
 
-    - Horizontal rule sits directly above the table (no gap).
+    - Columns reordered: 1h 2.5 -> 24h 2.5 -> 24h PSI
+    - Horizontal rule sits directly above the table (no gap), 50% width.
     - Colored circles sit on their own row directly below the header.
     - Title circle uses the worst color from the three column circles.
+    - All numeric columns are integers (no decimal).
     """
     lines: list[str] = []
 
@@ -350,10 +352,10 @@ def format_message(readings: dict) -> str:
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
         lines.append(HR)
 
-    # Table — header row, then circle row, then dash separator
-    header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"
-    circle_row = f"     |  {psi_dot}  |   {pm1_dot}   |   {pm24_dot}   "
-    sep        = "-----+------+--------+--------"
+    # Table — new column order: 1h 2.5 | 24h 2.5 | 24h PSI
+    header     = "Reg  | 1h 2.5 | 24h 2.5 | 24h PSI"
+    circle_row = f"     |   {pm1_dot}   |   {pm24_dot}   |   {psi_dot}   "
+    sep        = "-----+--------+---------+--------"
 
     table = [
         f"<code>{header}</code>",
@@ -370,11 +372,11 @@ def format_message(readings: dict) -> str:
         pm24_v = pm24_vals.get(region_title)
 
         reg_cell  = f" {abbr}   "
-        psi_cell  = f"{int(psi_v):>5} "   if psi_v  is not None else "   -- "
-        pm1_cell  = f"{pm1_v:>7.1f} "     if pm1_v  is not None else "     -- "
+        pm1_cell  = f"{int(pm1_v):>6} "   if pm1_v  is not None else "    -- "
         pm24_cell = f"{int(pm24_v):>7} "  if pm24_v is not None else "     -- "
+        psi_cell  = f"{int(psi_v):>6} "   if psi_v  is not None else "    -- "
 
-        table.append(f"<code>{reg_cell}|{psi_cell}|{pm1_cell}|{pm24_cell}</code>")
+        table.append(f"<code>{reg_cell}|{pm1_cell}|{pm24_cell}|{psi_cell}</code>")
 
     # Wrap table in a blockquote
     lines.append("<blockquote>" + "\n".join(table) + "</blockquote>")

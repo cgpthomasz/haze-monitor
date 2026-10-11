@@ -80,6 +80,10 @@ log = logging.getLogger("psi_monitor")
 # Air quality bands
 # =============================================================================
 
+# Severity rank used to pick the "worst" emoji for the title
+COLOR_RANK = {"🟢": 0, "🟠": 1, "🔴": 2, "🟣": 3, "💀": 4, "⚪": -1}
+
+
 def band_emoji(value: float, is_psi: bool = False) -> str:
     """Return a single colored circle representing the air-quality band."""
     if is_psi:
@@ -94,6 +98,11 @@ def band_emoji(value: float, is_psi: bool = False) -> str:
     if value <= 150:  return "🟠"       # Elevated
     if value <= 250:  return "🔴"       # High
     return "💀"                         # Very High
+
+
+def worst_color(emojis: list[str]) -> str:
+    """Return the emoji with the highest severity rank."""
+    return max(emojis, key=lambda e: COLOR_RANK.get(e, -1))
 
 # =============================================================================
 # HTTP helpers
@@ -266,10 +275,6 @@ def send_telegram(text: str, chat_id: str | None = None) -> None:
 # Message formatting
 # =============================================================================
 
-def fmt_num(v: float) -> str:
-    return f"{v:.1f}" if isinstance(v, float) and not v.is_integer() else str(int(v))
-
-
 def fmt_timestamp(ts_iso: str) -> str:
     """Format the API's timestamp as '10 Oct, 08:01 pm' (SGT)."""
     ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
@@ -301,52 +306,72 @@ def format_message(readings: dict) -> str:
     """Build the Telegram message (HTML) as a monospace table.
 
     Layout:
-        🔴 PSI Updated: 11 Oct, 12:30 am
+        🟠 PSI Updated: 11 Oct, 12:30 am
 
         Reg  |  PSI | 1h 2.5 | 24h 2.5
-        ----+------+--------+--------
-        C 🟠 |  149 |  100.0 |    102
-        W 🔴 |  151 |   98.0 |    104
-        S 🟠 |  115 |   98.0 |     69
-        E 🔴 |  136 |   84.0 |     90
-        N 🔴 |  118 |   68.0 |     71
+             |  🟠  |   🟠   |   🟢
+        -----+------+--------+--------
+         C   |  149 |  100.0 |    102
+         W   |  151 |   98.0 |    104
+         S   |  115 |   98.0 |     69
+         E   |  136 |   84.0 |     90
+         N   |  118 |   68.0 |     71
 
         🌡️ 29.1-30.9°c | 💧 70-85%
 
-    Bold "Reg" header and region initials; monospace values in code blocks.
+    - All table rows in <code> (monospace, no bold)
+    - One circle per column, below the header
+    - Title circle uses the worst color from the three column circles
     """
     lines: list[str] = []
 
-    # Title with worst-PSI alert circle
-    psi_data = readings.get("psi_24h", {})
-    worst_psi = max(psi_data.values()) if psi_data else 0
-    alert = band_emoji(worst_psi, is_psi=True)
+    # Pull readings per metric
+    psi_vals  = readings.get("psi_24h",  {})
+    pm1_vals  = readings.get("pm25_1h", {})
+    pm24_vals = readings.get("pm25_24h", {})
 
+    psi_max  = max(psi_vals.values())  if psi_vals  else None
+    pm1_max  = max(pm1_vals.values())  if pm1_vals  else None
+    pm24_max = max(pm24_vals.values()) if pm24_vals else None
+
+    # Circle per column — based on column max
+    psi_dot  = band_emoji(psi_max,  is_psi=True)  if psi_max  is not None else "⚪"
+    pm1_dot  = band_emoji(pm1_max,  is_psi=False) if pm1_max  is not None else "⚪"
+    pm24_dot = band_emoji(pm24_max, is_psi=False) if pm24_max is not None else "⚪"
+
+    # Title circle = worst of the three column circles
+    title_dot = worst_color([psi_dot, pm1_dot, pm24_dot])
+
+    # Title line
     if readings.get("timestamp"):
-        lines.append(f"{alert} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
+        lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
     lines.append("")
 
-    # Table header — "Reg" padded to match "C 🟠" width in data rows
-    lines.append("<b>Reg</b> <code> |  PSI | 1h 2.5 | 24h 2.5</code>")
-    lines.append("<code>----+------+--------+--------</code>")
+    # Table — fixed column widths (region=5, PSI=6, 1h=8, 24h=8)
+    header     = "Reg  |  PSI | 1h 2.5 | 24h 2.5"
+    circle_row = f"     |  {psi_dot}  |   {pm1_dot}   |   {pm24_dot}   "
+    sep        = "-----+------+--------+--------"
 
-    # Data rows, one per region
+    lines.append(f"<code>{header}</code>")
+    lines.append(f"<code>{circle_row}</code>")
+    lines.append(f"<code>{sep}</code>")
+
+    # Data rows
     for region_key in REGION_ORDER:
         region_title = region_key.title()
         abbr = REGION_ABBR[region_key]
 
-        psi_v  = readings.get("psi_24h",  {}).get(region_title)
-        pm1_v  = readings.get("pm25_1h", {}).get(region_title)
-        pm24_v = readings.get("pm25_24h", {}).get(region_title)
+        psi_v  = psi_vals.get(region_title)
+        pm1_v  = pm1_vals.get(region_title)
+        pm24_v = pm24_vals.get(region_title)
 
-        # Per-region circle, based on that region's PSI
-        dot = band_emoji(psi_v, is_psi=True) if psi_v is not None else "⚪"
+        reg_cell  = f" {abbr}   "
+        psi_cell  = f"{int(psi_v):>5} "   if psi_v  is not None else "   -- "
+        pm1_cell  = f"{pm1_v:>7.1f} "     if pm1_v  is not None else "     -- "
+        pm24_cell = f"{int(pm24_v):>7} "  if pm24_v is not None else "     -- "
 
-        psi_s  = f"{int(psi_v):>4}"  if psi_v  is not None else "  --"
-        pm1_s  = f"{pm1_v:>6.1f}"    if pm1_v  is not None else "    --"
-        pm24_s = f"{int(pm24_v):>6}" if pm24_v is not None else "    --"
-
-        lines.append(f"<b>{abbr}</b><code> {dot} | {psi_s} | {pm1_s} | {pm24_s}</code>")
+        row = f"{reg_cell}|{psi_cell}|{pm1_cell}|{pm24_cell}"
+        lines.append(f"<code>{row}</code>")
 
     lines.append("")
 

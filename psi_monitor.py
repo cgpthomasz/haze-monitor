@@ -329,13 +329,15 @@ def format_message(readings: dict) -> str:
         ━━━━━━━━━━━━━━━━━━━━━━━━━
         <blockquote>
         🟠 <b>1h   2.5:</b>
-        <b>C</b>:100 <b>W</b>:85 <b>S</b>:55 <b>E</b>:60 <b>N</b>:76
+        <b>C</b><code>:100</code>  <b>W</b><code>:85</code>  <b>S</b><code>:55</code>  <b>E</b><code>:60</code>  <b>N</b><code>:76</code>
         🟠 <b>24h  2.5:</b>
-        <b>C</b>:118 <b>W</b>:104 <b>S</b>:81 <b>E</b>:101 <b>N</b>:72
+        <b>C</b><code>:118</code>  <b>W</b><code>:104</code>  <b>S</b><code>:81</code>  <b>E</b><code>:101</code>  <b>N</b><code>:72</code>
         🔴 <b>24h  PSI:</b>
-        <b>C</b>:166 <b>W</b>:152 <b>S</b>:127 <b>E</b>:148 <b>N</b>:119
+        <b>C</b><code>:166</code>  <b>W</b><code>:152</code>  <b>S</b><code>:127</code>  <b>E</b><code>:148</code>  <b>N</b><code>:119</code>
         </blockquote>
         <code>🌡️ 26.8-29.6°c | 💧 77-99%</code>
+
+    Bold region letters + monospace numbers, with extra spacing between regions.
     """
     lines: list[str] = []
 
@@ -359,16 +361,17 @@ def format_message(readings: dict) -> str:
         worst = max(data.values())
         dot = band_emoji(worst, is_psi=(key == "psi_24h"))
 
-        # Readings in region order, with bold region letters
+        # Readings in region order:
+        #   bold region letter + monospace ":number"
         parts = []
         for region, val in ordered_items(data):
             abbr = REGION_ABBR.get(region.lower(), region[0].upper())
-            parts.append(f"<b>{abbr}</b>:{fmt_num(val)}")
+            parts.append(f"<b>{abbr}</b><code>:{fmt_num(val)}</code>")
 
         # Pad prefix to 7 chars so all bold prefixes have equal width
         prefix = meta["prefix"].ljust(4) + meta["short"].rjust(3)
         reading_blocks.append(
-            f"{dot} <b>{prefix}:</b>\n" + " ".join(parts)
+            f"{dot} <b>{prefix}:</b>\n" + "  ".join(parts)   # two spaces between regions
         )
 
     if reading_blocks:
@@ -380,7 +383,6 @@ def format_message(readings: dict) -> str:
         lines.append(f"<code>{weather}</code>")
 
     return "\n".join(lines)
-
 # =============================================================================
 # Entry point
 # =============================================================================

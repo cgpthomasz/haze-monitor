@@ -317,24 +317,28 @@ def fmt_weather(readings: dict) -> str:
 
 
 def _pad(value: float | None, arrow: str, num_width: int) -> str:
-    """Right-justify the number, then attach arrow, then a trailing space.
+    """Right-justify the number, add a space, then the arrow, then trailing space.
 
-    Total width = num_width + 2 (1 arrow slot + 1 trailing space).
-    Digits always end at num_width, so numbers align regardless of arrow.
+    Format:  {num:>num_width} {arrow} 
+             ^^^^^^^^^^^^^^^^ ^^^^^^^ ^
+             padded number    space   trailing
+                              +arrow
+
+    Total width = num_width + 3.
     """
     if value is None:
-        return "-" * (num_width + 2)
-    return f"{int(value):>{num_width}}{arrow} "
+        return "-" * (num_width + 3)
+    return f"{int(value):>{num_width}} {arrow} "
 
 
 def format_message(readings: dict, prev: dict | None = None) -> str:
     """Build the Telegram message (HTML) as a monospace table inside a blockquote.
 
-    Column widths (chars, excl. the | separators) — same as before arrows:
+    Column widths (chars, excl. the | separators):
         Col 1 (Reg):      5
-        Col 2 (1h 2.5):   8   (6 num + 1 arrow + 1 space)
-        Col 3 (24h 2.5):  9   (7 num + 1 arrow + 1 space)
-        Col 4 (24h PSI):  8   (6 num + 1 arrow + 1 space)
+        Col 2 (1h 2.5):   8   (5 num + 1 space + 1 arrow + 1 trailing)
+        Col 3 (24h 2.5):  9   (6 num + 1 space + 1 arrow + 1 trailing)
+        Col 4 (24h PSI):  8   (5 num + 1 space + 1 arrow + 1 trailing)
     Total: 33 chars.
 
     Layout:
@@ -343,11 +347,11 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
         >      |   🟠   |   🟢    |   🟠
         > -----+--------+---------+--------
-        >  C   |  100↑  |   102   |  149↑
-        >  W   |   98↓  |   104   |  151↓
-        >  S   |   98   |    69↑  |  115
-        >  E   |   84↓  |    90   |  136↓
-        >  N   |   68↑  |    71↓  |  118↑
+        >  C   |  100 ↑ |   102   |  149 ↑
+        >  W   |   98 ↓ |   104   |  151 ↓
+        >  S   |   98   |    69 ↑ |  115
+        >  E   |   84 ↓ |    90   |  136 ↓
+        >  N   |   68 ↑ |    71 ↓ |  118 ↑
 
         🌡️ 29.1-30.9°c | 💧 70-85%
     """
@@ -411,12 +415,12 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
 
         # Column 1: 5 chars
         reg_cell  = f" {abbr}   "
-        # Column 2: 8 chars = 6 num + 1 arrow + 1 trailing space
-        pm1_cell  = _pad(pm1_v,  pm1_arrow,  6)
-        # Column 3: 9 chars = 7 num + 1 arrow + 1 trailing space
-        pm24_cell = _pad(pm24_v, pm24_arrow, 7)
-        # Column 4: 8 chars = 6 num + 1 arrow + 1 trailing space
-        psi_cell  = _pad(psi_v,  psi_arrow,  6)
+        # Column 2: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
+        pm1_cell  = _pad(pm1_v,  pm1_arrow,  5)
+        # Column 3: 9 chars = 6 num + 1 space + 1 arrow + 1 trailing space
+        pm24_cell = _pad(pm24_v, pm24_arrow, 6)
+        # Column 4: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
+        psi_cell  = _pad(psi_v,  psi_arrow,  5)
 
         table.append(f"<code>{reg_cell}|{pm1_cell}|{pm24_cell}|{psi_cell}</code>")
 

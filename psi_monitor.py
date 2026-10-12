@@ -109,14 +109,14 @@ def worst_color(emojis: list[str]) -> str:
 
 
 def trend_arrow(current: float | None, previous: float | None) -> str:
-    """Return ↑ (rose), ↓ (fell), or '' (unchanged / no previous)."""
+    """Return ↑ (rose), ↓ (fell), or ' ' (unchanged / no previous)."""
     if current is None or previous is None:
-        return ""
+        return " "
     if current > previous:
         return "↑"
     if current < previous:
         return "↓"
-    return ""
+    return " "
 
 # =============================================================================
 # HTTP helpers
@@ -316,26 +316,42 @@ def fmt_weather(readings: dict) -> str:
     return " | ".join(parts)
 
 
+def _pad(value: float | None, arrow: str, num_width: int) -> str:
+    """Right-justify the number, add a space, then the arrow, then trailing space.
+
+    Format:  {num:>num_width} {arrow} 
+             ^^^^^^^^^^^^^^^^ ^^^^^^^ ^
+             padded number    space   trailing
+                              +arrow
+
+    Total width = num_width + 3.
+    """
+    if value is None:
+        return "-" * (num_width + 3)
+    return f"{int(value):>{num_width}} {arrow} "
+
+
 def format_message(readings: dict, prev: dict | None = None) -> str:
     """Build the Telegram message (HTML) as a monospace table inside a blockquote.
 
     Column widths (chars, excl. the | separators):
         Col 1 (Reg):      5
-        Col 2 (1h 2.5):   8
-        Col 3 (24h 2.5):  9
-        Col 4 (24h PSI):  8
+        Col 2 (1h 2.5):   8   (5 num + 1 space + 1 arrow + 1 trailing)
+        Col 3 (24h 2.5):  9   (6 num + 1 space + 1 arrow + 1 trailing)
+        Col 4 (24h PSI):  8   (5 num + 1 space + 1 arrow + 1 trailing)
+    Total: 33 chars.
 
     Layout:
         🟠 PSI Updated: 11 Oct, 12:30 am
         ━━━━━━━━━━━━━━━━━━
         > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
-        >      |   🟠    |   🟢    |   🟠
+        >      |   🟠   |   🟢    |   🟠
         > -----+--------+---------+--------
-        >  C   |    100↑ |     102 |    149↑
-        >  W   |     98↓ |     104 |    151↓
-        >  S   |     98  |      69↑ |    115
-        >  E   |     84↓ |      90 |    136↓
-        >  N   |     68↑ |      71↓ |    118↑
+        >  C   |  100 ↑ |   102   |  149 ↑
+        >  W   |   98 ↓ |   104   |  151 ↓
+        >  S   |   98   |    69 ↑ |  115
+        >  E   |   84 ↓ |    90   |  136 ↓
+        >  N   |   68 ↑ |    71 ↓ |  118 ↑
 
         🌡️ 29.1-30.9°c | 💧 70-85%
     """
@@ -369,7 +385,7 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
         lines.append(HR)
 
-    # Table rows — every row must total 33 chars for the separators to align.
+    # Table rows — every row totals 33 chars so separators align.
     #
     #   Col 1: 5 chars   Col 2: 8 chars   Col 3: 9 chars   Col 4: 8 chars
     #   Between columns: 1 char each (| or +)
@@ -392,19 +408,19 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         pm1_v  = pm1_vals.get(region_title)
         pm24_v = pm24_vals.get(region_title)
 
-        # Trend arrows (blank if unchanged or no previous data)
+        # Trend arrows (blank ' ' if unchanged or no previous data)
         pm1_arrow  = trend_arrow(pm1_v,  prev_pm1.get(region_title))
         pm24_arrow = trend_arrow(pm24_v, prev_pm24.get(region_title))
         psi_arrow  = trend_arrow(psi_v,  prev_psi.get(region_title))
 
         # Column 1: 5 chars
         reg_cell  = f" {abbr}   "
-        # Column 2: 8 chars (right-justified)
-        pm1_cell  = f"{str(int(pm1_v))  + pm1_arrow:>8}" if pm1_v  is not None else "      --"
-        # Column 3: 9 chars (right-justified)
-        pm24_cell = f"{str(int(pm24_v)) + pm24_arrow:>9}" if pm24_v is not None else "       --"
-        # Column 4: 8 chars (right-justified)
-        psi_cell  = f"{str(int(psi_v))  + psi_arrow:>8}" if psi_v  is not None else "      --"
+        # Column 2: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
+        pm1_cell  = _pad(pm1_v,  pm1_arrow,  5)
+        # Column 3: 9 chars = 6 num + 1 space + 1 arrow + 1 trailing space
+        pm24_cell = _pad(pm24_v, pm24_arrow, 6)
+        # Column 4: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
+        psi_cell  = _pad(psi_v,  psi_arrow,  5)
 
         table.append(f"<code>{reg_cell}|{pm1_cell}|{pm24_cell}|{psi_cell}</code>")
 

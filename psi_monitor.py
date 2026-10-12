@@ -107,6 +107,17 @@ def worst_color(emojis: list[str]) -> str:
     """Return the emoji with the highest severity rank."""
     return max(emojis, key=lambda e: COLOR_RANK.get(e, -1))
 
+
+def trend_arrow(current: float | None, previous: float | None) -> str:
+    """Return ↑ (rose), ↓ (fell), or '' (unchanged / no previous)."""
+    if current is None or previous is None:
+        return ""
+    if current > previous:
+        return "↑"
+    if current < previous:
+        return "↓"
+    return ""
+
 # =============================================================================
 # HTTP helpers
 # =============================================================================
@@ -305,28 +316,28 @@ def fmt_weather(readings: dict) -> str:
     return " | ".join(parts)
 
 
-def format_message(readings: dict) -> str:
+def format_message(readings: dict, prev: dict | None = None) -> str:
     """Build the Telegram message (HTML) as a monospace table inside a blockquote.
+
+    Column widths (chars, excl. the | separators):
+        Col 1 (Reg):      5
+        Col 2 (1h 2.5):   8
+        Col 3 (24h 2.5):  9
+        Col 4 (24h PSI):  8
 
     Layout:
         🟠 PSI Updated: 11 Oct, 12:30 am
         ━━━━━━━━━━━━━━━━━━
         > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
-        >      |   🟠   |   🟢    |   🟠
+        >      |   🟠    |   🟢    |   🟠
         > -----+--------+---------+--------
-        >  C   |    100 |     102 |   149
-        >  W   |     98 |     104 |   151
-        >  S   |     98 |      69 |   115
-        >  E   |     84 |      90 |   136
-        >  N   |     68 |      71 |   118
+        >  C   |    100↑ |     102 |    149↑
+        >  W   |     98↓ |     104 |    151↓
+        >  S   |     98  |      69↑ |    115
+        >  E   |     84↓ |      90 |    136↓
+        >  N   |     68↑ |      71↓ |    118↑
 
         🌡️ 29.1-30.9°c | 💧 70-85%
-
-    - Columns reordered: 1h 2.5 -> 24h 2.5 -> 24h PSI
-    - Horizontal rule sits directly above the table (no gap), 50% width.
-    - Colored circles sit on their own row directly below the header.
-    - Title circle uses the worst color from the three column circles.
-    - All numeric columns are integers (no decimal).
     """
     lines: list[str] = []
 
@@ -334,6 +345,12 @@ def format_message(readings: dict) -> str:
     psi_vals  = readings.get("psi_24h",  {})
     pm1_vals  = readings.get("pm25_1h", {})
     pm24_vals = readings.get("pm25_24h", {})
+
+    # Previous readings (for trend arrows)
+    prev = prev or {}
+    prev_psi  = prev.get("psi_24h",  {})
+    prev_pm1  = prev.get("pm25_1h", {})
+    prev_pm24 = prev.get("pm25_24h", {})
 
     psi_max  = max(psi_vals.values())  if psi_vals  else None
     pm1_max  = max(pm1_vals.values())  if pm1_vals  else None
@@ -352,9 +369,13 @@ def format_message(readings: dict) -> str:
         lines.append(f"{title_dot} <b>PSI Updated:</b> {fmt_timestamp(readings['timestamp'])}")
         lines.append(HR)
 
-    # Table — new column order: 1h 2.5 | 24h 2.5 | 24h PSI
+    # Table rows — every row must total 33 chars for the separators to align.
+    #
+    #   Col 1: 5 chars   Col 2: 8 chars   Col 3: 9 chars   Col 4: 8 chars
+    #   Between columns: 1 char each (| or +)
+
     header     = "Reg  | 1h 2.5 | 24h 2.5 | 24h PSI"
-    circle_row = f"     |   {pm1_dot}   |   {pm24_dot}   |   {psi_dot}   "
+    circle_row = f"     |   {pm1_dot}   |   {pm24_dot}    |   {psi_dot}   "
     sep        = "-----+--------+---------+--------"
 
     table = [
@@ -371,10 +392,19 @@ def format_message(readings: dict) -> str:
         pm1_v  = pm1_vals.get(region_title)
         pm24_v = pm24_vals.get(region_title)
 
+        # Trend arrows (blank if unchanged or no previous data)
+        pm1_arrow  = trend_arrow(pm1_v,  prev_pm1.get(region_title))
+        pm24_arrow = trend_arrow(pm24_v, prev_pm24.get(region_title))
+        psi_arrow  = trend_arrow(psi_v,  prev_psi.get(region_title))
+
+        # Column 1: 5 chars
         reg_cell  = f" {abbr}   "
-        pm1_cell  = f"{int(pm1_v):>6} "   if pm1_v  is not None else "    -- "
-        pm24_cell = f"{int(pm24_v):>7} "  if pm24_v is not None else "     -- "
-        psi_cell  = f"{int(psi_v):>6} "   if psi_v  is not None else "    -- "
+        # Column 2: 8 chars (right-justified)
+        pm1_cell  = f"{str(int(pm1_v))  + pm1_arrow:>8}" if pm1_v  is not None else "      --"
+        # Column 3: 9 chars (right-justified)
+        pm24_cell = f"{str(int(pm24_v)) + pm24_arrow:>9}" if pm24_v is not None else "       --"
+        # Column 4: 8 chars (right-justified)
+        psi_cell  = f"{str(int(psi_v))  + psi_arrow:>8}" if psi_v  is not None else "      --"
 
         table.append(f"<code>{reg_cell}|{pm1_cell}|{pm24_cell}|{psi_cell}</code>")
 
@@ -408,7 +438,11 @@ def main() -> int:
         log.error("Fetch failed: %s", e)
         return 1
 
-    text = format_message(current)
+    # Load previous reading BEFORE formatting so arrows can be rendered
+    state = load_state()
+    prev = state.get("last_reading")
+
+    text = format_message(current, prev)
 
     # Always print so it shows up in GitHub Actions logs
     print("--- Message preview ---")
@@ -417,9 +451,6 @@ def main() -> int:
 
     if args.preview:
         return 0
-
-    state = load_state()
-    prev = state.get("last_reading")
 
     # Dedup: only the API's timestamp matters
     if not args.force and state_key(current) == state_key(prev):

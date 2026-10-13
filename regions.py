@@ -169,9 +169,7 @@ def _normalise(name: str) -> str:
 
 def resolve_town(town: str) -> str | None:
     """Resolve an alias to its canonical town name, or return the input
-    normalised if no alias matches.
-
-    Returns None if the input is empty.
+    normalised if no alias matches. Returns None if the input is empty.
     """
     key = _normalise(town)
     if not key:
@@ -186,14 +184,6 @@ def region_for_town(town: str) -> str | None:
         1. Normalise input (lowercase, strip, collapse whitespace)
         2. Resolve alias if one matches
         3. Look up the canonical town in TOWN_TO_REGION
-
-    Examples
-    --------
-        region_for_town("Bishan")       -> "central"
-        region_for_town("amk")          -> "east"
-        region_for_town("Jurong East")  -> "west"
-        region_for_town("CCK")          -> "west"
-        region_for_town("Unknown")      -> None
     """
     canonical = resolve_town(town)
     if canonical is None:
@@ -202,10 +192,7 @@ def region_for_town(town: str) -> str | None:
 
 
 def region_or_default(town: str, default: str = "central") -> str:
-    """Like region_for_town, but returns a default instead of None.
-
-    Useful when you want to always produce a region, even for unknown towns.
-    """
+    """Like region_for_town, but returns a default instead of None."""
     return region_for_town(town) or default
 
 

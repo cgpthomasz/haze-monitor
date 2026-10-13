@@ -2,9 +2,9 @@
 """
 Singapore Haze PSI + PM2.5 Monitor
 
-Pulls 24-hour PSI, 24-hour PM2.5, 1-hour PM2.5, air temperature, and relative
-humidity from data.gov.sg (NEA data), and sends a Telegram message only when
-the API's timestamp changes.
+Pulls 24-hour PSI, 24-hour PM2.5, 1-hour PM2.5, air temperature, relative
+humidity, and 2-hour rain forecast from data.gov.sg (NEA data), and sends a
+Telegram message only when the API's timestamp changes.
 
 Runs hourly via GitHub Actions. Credentials come from environment variables
 (set as GitHub Secrets):
@@ -32,6 +32,15 @@ from typing import Any
 
 import requests
 
+# Optional: town-to-region mapping for rain forecast. If missing, rain
+# information is silently skipped — the rest of the script runs normally.
+try:
+    from regions import region_for_town
+    _REGIONS_AVAILABLE = True
+except ImportError:
+    region_for_town = None
+    _REGIONS_AVAILABLE = False
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -47,6 +56,7 @@ PM25_URL          = "https://api-open.data.gov.sg/v2/real-time/api/pm25"
 PM25_FALLBACK_URL = "https://api.data.gov.sg/v1/environment/pm25"
 TEMP_URL          = "https://api-open.data.gov.sg/v2/real-time/api/air-temperature"
 HUMIDITY_URL      = "https://api-open.data.gov.sg/v2/real-time/api/relative-humidity"
+FORECAST_URL      = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
 
 # Runtime settings
 HTTP_TIMEOUT       = 30          # seconds
@@ -68,7 +78,7 @@ TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 REGION_ABBR  = {"central": "C", "west": "W", "south": "S", "east": "E", "north": "N"}
 
-# Horizontal rule — placed between title and table (50% width)
+# Horizontal rule — 50% width, used between title and table, and above the rain line
 HR = "━" * 18
 
 # =============================================================================
@@ -78,6 +88,9 @@ HR = "━" * 18
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("psi_monitor")
+
+if not _REGIONS_AVAILABLE:
+    log.warning("regions.py not found — rain forecast will be skipped")
 
 # =============================================================================
 # Air quality bands
@@ -117,6 +130,49 @@ def trend_arrow(current: float | None, previous: float | None) -> str:
     if current < previous:
         return "↓"
     return " "
+
+# =============================================================================
+# Rain forecast helpers
+# =============================================================================
+
+# Words in a forecast that indicate rain
+RAIN_KEYWORDS = ("rain", "shower")
+
+# Severity ranking (higher = worse). Used to pick the emoji and the region order.
+FORECAST_SEVERITY = {
+    "heavy thundery showers with gusty winds": 6,
+    "heavy thundery showers":                  5,
+    "thundery showers":                        4,
+    "heavy showers":                           3,
+    "heavy rain":                              3,
+    "showers":                                 2,
+    "moderate rain":                           2,
+    "light showers":                           1,
+    "light rain":                              1,
+    "passing showers":                         1,
+}
+
+
+def is_rainy(forecast: str) -> bool:
+    """True if the forecast text mentions rain or showers."""
+    f = forecast.lower()
+    return any(kw in f for kw in RAIN_KEYWORDS)
+
+
+def rain_emoji(forecast: str) -> str:
+    """Pick an emoji based on the nature of the rain forecast."""
+    f = forecast.lower()
+    if "thundery" in f:
+        return "⛈️"        # Thunderstorm
+    if "heavy" in f:
+        return "🌧️"        # Heavy rain
+    return "🌦️"            # Light / moderate rain
+
+
+def forecast_severity(forecast: str) -> int:
+    """Return a numeric severity rank for a forecast string."""
+    return FORECAST_SEVERITY.get(forecast.lower(), 0)
+
 
 # =============================================================================
 # HTTP helpers
@@ -162,8 +218,14 @@ def _parse_stations(payload: dict) -> list[float]:
     return [float(r["value"]) for r in item["data"]]
 
 
+def _parse_forecast(payload: dict) -> dict[str, str]:
+    """Return {town_name: forecast_string} from a two-hr-forecast response."""
+    item = payload["data"]["items"][0]
+    return {f["area"]: f["forecast"] for f in item["forecasts"]}
+
+
 def fetch_all() -> dict:
-    """Fetch PSI, PM2.5, temperature, and humidity."""
+    """Fetch PSI, PM2.5, temperature, humidity, and 2-hour rain forecast."""
     result: dict[str, Any] = {"psi_24h": {}, "pm25_24h": {}, "pm25_1h": {}}
     timestamps: list[str] = []
 
@@ -220,6 +282,17 @@ def fetch_all() -> dict:
         log.warning("Humidity fetch failed: %s", e)
         result["humidity_min"] = None
         result["humidity_max"] = None
+
+    # Two-hour rain forecast per town (skip entirely if regions.py is missing)
+    if _REGIONS_AVAILABLE:
+        try:
+            result["forecast"] = _parse_forecast(get_json(FORECAST_URL))
+            log.info("Forecast fetched (%d towns)", len(result["forecast"]))
+        except Exception as e:
+            log.warning("Forecast fetch failed: %s", e)
+            result["forecast"] = {}
+    else:
+        result["forecast"] = {}
 
     return result
 
@@ -316,13 +389,50 @@ def fmt_weather(readings: dict) -> str:
     return " | ".join(parts)
 
 
+def fmt_rain_forecast(readings: dict) -> str:
+    """Return a rain line if any region is forecast to get rain in the next 2h.
+
+    Groups rainy towns by NEA region, keeps the worst forecast per region,
+    then picks the worst emoji across all rainy regions.
+    Returns '' if regions.py is not available, or no region has rain.
+    """
+    if not _REGIONS_AVAILABLE:
+        return ""
+
+    forecast = readings.get("forecast", {})
+    if not forecast:
+        return ""
+
+    # For each region, keep the worst (highest severity) forecast
+    region_worst: dict[str, tuple[int, str]] = {}
+    for town, fc in forecast.items():
+        if not is_rainy(fc):
+            continue
+        region = region_for_town(town)
+        if region is None:
+            continue
+        sev = forecast_severity(fc)
+        prev = region_worst.get(region)
+        if prev is None or sev > prev[0]:
+            region_worst[region] = (sev, fc)
+
+    if not region_worst:
+        return ""
+
+    # Overall emoji = worst forecast across all rainy regions
+    overall_worst_fc = max(region_worst.values(), key=lambda x: x[0])[1]
+    emoji = rain_emoji(overall_worst_fc)
+
+    # List regions in fixed order (Central/West/South/East/North)
+    ordered = [r for r in REGION_ORDER if r in region_worst]
+    region_names = "/".join(r.title() for r in ordered)
+    area_word = "area" if len(ordered) == 1 else "areas"
+
+    return f"{emoji} Next 2hrs in {region_names} {area_word} ☔"
+
+
 def _pad(value: float | None, arrow: str, num_width: int) -> str:
     """Right-justify the number, add a space, then the arrow, then trailing space.
-
-    Format:  {num:>num_width} {arrow} 
-             ^^^^^^^^^^^^^^^^ ^^^^^^^ ^
-             padded number    space   trailing
-                              +arrow
 
     Total width = num_width + 3.
     """
@@ -332,16 +442,11 @@ def _pad(value: float | None, arrow: str, num_width: int) -> str:
 
 
 def format_message(readings: dict, prev: dict | None = None) -> str:
-    """Build the Telegram message (HTML) as a monospace table inside a blockquote.
+    """Build the Telegram message (HTML).
 
-    Column widths (chars, excl. the | separators):
-        Col 1 (Reg):      5
-        Col 2 (1h 2.5):   8   (5 num + 1 space + 1 arrow + 1 trailing)
-        Col 3 (24h 2.5):  9   (6 num + 1 space + 1 arrow + 1 trailing)
-        Col 4 (24h PSI):  8   (5 num + 1 space + 1 arrow + 1 trailing)
-    Total: 33 chars.
-
-    Layout:
+    Layout with rain forecast:
+        ⛈️ Next 2hrs in West area ☔
+        ━━━━━━━━━━━━━━━━━━
         🟠 PSI Updated: 11 Oct, 12:30 am
         ━━━━━━━━━━━━━━━━━━
         > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
@@ -352,10 +457,22 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         >  S   |   98   |    69 ↑ |  115
         >  E   |   84 ↓ |    90   |  136 ↓
         >  N   |   68 ↑ |    71 ↓ |  118 ↑
+        🌡️ 29.1-30.9°c | 💧 70-85%
 
+    Layout without rain forecast:
+        🟠 PSI Updated: 11 Oct, 12:30 am
+        ━━━━━━━━━━━━━━━━━━
+        > Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
+        ...
         🌡️ 29.1-30.9°c | 💧 70-85%
     """
     lines: list[str] = []
+
+    # Rain forecast block — at the very top, if applicable
+    rain = fmt_rain_forecast(readings)
+    if rain:
+        lines.append(rain)
+        lines.append(HR)
 
     # Pull readings per metric
     psi_vals  = readings.get("psi_24h",  {})
@@ -386,10 +503,6 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         lines.append(HR)
 
     # Table rows — every row totals 33 chars so separators align.
-    #
-    #   Col 1: 5 chars   Col 2: 8 chars   Col 3: 9 chars   Col 4: 8 chars
-    #   Between columns: 1 char each (| or +)
-
     header     = "Reg  | 1h 2.5 | 24h 2.5 | 24h PSI"
     circle_row = f"     |   {pm1_dot}   |   {pm24_dot}    |   {psi_dot}   "
     sep        = "-----+--------+---------+--------"
@@ -408,23 +521,17 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
         pm1_v  = pm1_vals.get(region_title)
         pm24_v = pm24_vals.get(region_title)
 
-        # Trend arrows (blank ' ' if unchanged or no previous data)
         pm1_arrow  = trend_arrow(pm1_v,  prev_pm1.get(region_title))
         pm24_arrow = trend_arrow(pm24_v, prev_pm24.get(region_title))
         psi_arrow  = trend_arrow(psi_v,  prev_psi.get(region_title))
 
-        # Column 1: 5 chars
         reg_cell  = f" {abbr}   "
-        # Column 2: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
         pm1_cell  = _pad(pm1_v,  pm1_arrow,  5)
-        # Column 3: 9 chars = 6 num + 1 space + 1 arrow + 1 trailing space
         pm24_cell = _pad(pm24_v, pm24_arrow, 6)
-        # Column 4: 8 chars = 5 num + 1 space + 1 arrow + 1 trailing space
         psi_cell  = _pad(psi_v,  psi_arrow,  5)
 
         table.append(f"<code>{reg_cell}|{pm1_cell}|{pm24_cell}|{psi_cell}</code>")
 
-    # Wrap table in a blockquote
     lines.append("<blockquote>" + "\n".join(table) + "</blockquote>")
 
     # Weather line — outside the blockquote
@@ -441,52 +548,4 @@ def format_message(readings: dict, prev: dict | None = None) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Singapore haze monitor")
     ap.add_argument("--preview", action="store_true",
-                    help="Print the message without sending or saving state")
-    ap.add_argument("--force", action="store_true",
-                    help="Send even if timestamp is unchanged")
-    ap.add_argument("--to", metavar="CHAT_ID", default=None,
-                    help="Send to this chat ID instead of TELEGRAM_CHAT_ID (testing)")
-    args = ap.parse_args()
-
-    try:
-        current = fetch_all()
-    except Exception as e:
-        log.error("Fetch failed: %s", e)
-        return 1
-
-    # Load previous reading BEFORE formatting so arrows can be rendered
-    state = load_state()
-    prev = state.get("last_reading")
-
-    text = format_message(current, prev)
-
-    # Always print so it shows up in GitHub Actions logs
-    print("--- Message preview ---")
-    print(text)
-    print("-----------------------")
-
-    if args.preview:
-        return 0
-
-    # Dedup: only the API's timestamp matters
-    if not args.force and state_key(current) == state_key(prev):
-        log.info("timestamp unchanged (%s); skipping Telegram message",
-                 state_key(current))
-        return 0
-
-    try:
-        send_telegram(text, chat_id=args.to)
-    except Exception as e:
-        log.error("Telegram send failed: %s", e)
-        return 1
-
-    state["last_reading"] = current
-    state["last_sent_at"] = datetime.now(SGT).isoformat()
-    save_state(state)
-    log.info("Message sent to Telegram (force=%s, to=%s)",
-             args.force, args.to or "default")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+            

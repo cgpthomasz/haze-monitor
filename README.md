@@ -1,6 +1,6 @@
 # Singapore Haze Monitor
 
-Hourly Singapore air quality updates — PSI, PM2.5, temperature, and humidity — pulled from [data.gov.sg](https://data.gov.sg) and posted to Telegram when the data changes.
+Hourly Singapore air quality updates — PSI, PM2.5, temperature, humidity, and 2-hour rain forecast — pulled from [data.gov.sg](https://data.gov.sg) and posted to Telegram when the data changes.
 
 Runs on GitHub Actions. No server, no hosting fees.
 
@@ -10,24 +10,30 @@ Runs on GitHub Actions. No server, no hosting fees.
 
 ```
 
-🟠 PSI Updated: 11 Oct, 12:30 am
+⛈️ Next 2hrs in West area ☔
+━━━━━━━━━━━━━━━━━━
+🟠 PSI Updated: 13 Oct, 12:30 am
 ━━━━━━━━━━━━━━━━━━
 ┃ Reg  | 1h 2.5 | 24h 2.5 | 24h PSI
 ┃      |   🟠   |   🟢    |   🟠
 ┃ -----+--------+---------+--------
-┃  C   |    100 |     102 |   149
-┃  W   |     98 |     104 |   151
-┃  S   |     98 |      69 |   115
-┃  E   |     84 |      90 |   136
-┃  N   |     68 |      71 |   118
+┃  C   |  100 ↑ |   102   |  149 ↑
+┃  W   |   98 ↓ |   104   |  151 ↓
+┃  S   |   98   |    69 ↑ |  115
+┃  E   |   84 ↓ |    90   |  136 ↓
+┃  N   |   68 ↑ |    71 ↓ |  118 ↑
 🌡️ 29.1-30.9°c | 💧 70-85%
 
 ```
 
+If no region is forecast to get rain, the rain line and its ruler are omitted.
+
 Regions: **C**entral · **W**est · **S**outh · **E**ast · **N**orth
 
-Columns ordered by reactivity — fastest-changing (most actionable) on the left:
+Columns ordered by reactivity — fastest-changing on the left:
 **1h PM2.5** → **24h PM2.5** → **24h PSI**
+
+Trend arrows: `↑` rose · `↓` fell · blank = unchanged
 
 ### Colour code
 
@@ -36,6 +42,14 @@ One circle per column, based on the worst region in that column.
 **PM2.5 (µg/m³):** 🟢 0–55 · 🟠 56–150 · 🔴 151–250 · 💀 ≥251
 
 **PSI:** 🟢 0–50 · 🟠 51–100 · 🔴 101–200 · 🟣 201–300 · 💀 ≥301
+
+### Rain emoji
+
+| Forecast | Emoji |
+|---|---|
+| Thundery showers | ⛈️ |
+| Heavy rain/showers | 🌧️ |
+| Light/moderate/passing | 🌦️ |
 
 ---
 
@@ -64,7 +78,7 @@ Actions → Singapore Haze Monitor → Run workflow
 
 ## Scheduling
 
-GitHub's native cron is best-effort — runs can be delayed or skipped. For reliable hourly triggers, use **cron-job.org**:
+GitHub's native cron is best-effort. For reliable hourly triggers, use **cron-job.org**:
 
 1. Create a **GitHub PAT** (Fine-grained, `Actions: Read and write`)
 2. In cron-job.org, create a job:
@@ -78,13 +92,58 @@ GitHub's native cron is best-effort — runs can be delayed or skipped. For reli
      - `Content-Type: application/json`
    - **Schedule:** hourly, minute 5, timezone Asia/Singapore
 3. Successful trigger returns **204 No Content**
-4. **Renew the PAT every ~90 days** or triggering stops silently
+4. **Renew the PAT every ~90 days**
 
 ---
 
-## Configuration
+## Files
 
-**Toggle metrics** — edit `psi_monitor.py`:
+| File | Purpose |
+|---|---|
+| `psi_monitor.py` | Main script |
+| `regions.py` | Town → NEA region mapping (used for rain forecast) |
+| `requirements.txt` | Dependencies (`requests`) |
+| `.github/workflows/psi_monitor.yml` | Workflow |
+
+**Note:** If `regions.py` is missing, the script still runs — it just skips the rain line. All other features work normally. A warning appears in the Actions log:
+
+```
+
+WARNING regions.py not found — rain forecast will be skipped
+
+```
+
+---
+
+## CLI
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Send only if timestamp changed |
+| `--preview` | Print only, no send, no state |
+| `--force` | Send even if unchanged |
+| `--to CHAT_ID` | Send to a different chat (testing) |
+
+```bash
+python psi_monitor.py --preview
+python psi_monitor.py --force --to 123456789
+```
+
+---
+
+Test branch
+
+The workflow targets different chats based on branch:
+
+Branch Target Force send?
+main Channel Only on change
+test Your DM (TELEGRAM_CHAT_ID_TEST) Yes
+
+---
+
+Configuration
+
+Toggle metrics — edit psi_monitor.py:
 
 ```python
 SEND_PSI_24H  = True
@@ -104,43 +163,7 @@ Region order:
 REGION_ORDER = ["central", "west", "south", "east", "north"]
 ```
 
----
-
-CLI
-
-Flag Effect
-(none) Send only if timestamp changed
---preview Print only, no send, no state
---force Send even if unchanged
---to CHAT_ID Send to a different chat (testing)
-
-```bash
-python psi_monitor.py --preview
-python psi_monitor.py --force --to 123456789
-```
-
----
-
-Test branch
-
-The workflow targets different chats based on branch:
-
-Branch Target Force send?
-main Channel Only on change
-test Your DM (TELEGRAM_CHAT_ID_TEST) Yes
-
-Use the test branch to iterate on format without spamming the channel. Merge to main when happy.
-
----
-
-Files
-
-File Purpose
-psi_monitor.py Main script
-requirements.txt Dependencies (requests)
-.github/workflows/psi_monitor.yml Workflow
-
-State is stored in GitHub Actions cache — never committed to the repo.
+Rain forecast thresholds — edit FORECAST_SEVERITY in psi_monitor.py to adjust the emoji ranking.
 
 ---
 
@@ -152,11 +175,11 @@ Workflow missing from Actions tab — File must be at .github/workflows/<name>.y
 
 Failed to save: Unable to reserve cache — Use a fresh run (Actions → Run workflow), not "Re-run all jobs"
 
-Message sent every hour — Dedup uses API timestamp; ensure state_key() is used, not full-dict comparison
+Rain line never appears — Check that regions.py is present on the branch being run, and that at least one town has rain forecast. The log will show WARNING regions.py not found if the file is missing.
+
+SyntaxError: '(' was never closed — A merge conflict left broken code. Replace the affected file with the full version from the repo history.
 
 Scheduled runs not firing — Check Actions tab for a disabled banner; confirm workflow is on main; use cron-job.org for reliability
-
-Force a test send — Use --force, or delete psi-state-* entries in Actions → Caches
 
 ---
 
@@ -166,6 +189,8 @@ Data sources
 · 1h PM2.5: api-open.data.gov.sg/v2/real-time/api/pm25
 · Temperature: api-open.data.gov.sg/v2/real-time/api/air-temperature
 · Humidity: api-open.data.gov.sg/v2/real-time/api/relative-humidity
+· 2-hour forecast: api-open.data.gov.sg/v2/real-time/api/two-hr-forecast
+· Town list: https://www.bcs.org.sg/form/region
 
 Source: NEA. Readings older than 3 hours are rejected.
 
